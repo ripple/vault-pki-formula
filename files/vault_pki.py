@@ -44,6 +44,8 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives import serialization
 
+import six
+
 from salt import client as salt_client
 
 OWNER_UID = 0
@@ -84,7 +86,7 @@ DEFAULT_KEY_LENGTH = 2048
 
 SALT_EVENT_TAG = 'request/sign'
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(__file__)
 
 
 class SetupError(Exception):
@@ -123,8 +125,8 @@ def setup_directories(base_dir, fqdn, mode, uid, gid):
     settings = {'base': base_dir, 'fqdn': fqdn}
     dir_tree = DIR_TREE[:]
     dir_tree.insert(0, base_dir)
-    for directory in DIR_TREE:
-        expected_dirs.append((directory.format(settings), mode, uid, gid))
+    for directory in dir_tree:
+        expected_dirs.append((directory.format(**settings), mode, uid, gid))
 
     errors = []
     for dir_settings in expected_dirs:
@@ -160,7 +162,7 @@ def generate(fqdn, write_dir, key_length, mode, owner_uid, group_gid):
     builder = x509.CertificateSigningRequestBuilder()
     common_name = x509.NameAttribute(
         x509.oid.NameOID.COMMON_NAME,
-        fqdn)
+        six.u(fqdn))
     builder = builder.subject_name(x509.Name([common_name]))
     builder = builder.add_extension(x509.BasicConstraints(
         ca=False,
@@ -298,9 +300,10 @@ def checkgen_main(args):
         setup_directories(BASE_DIR, fqdn, DIR_MODE, OWNER_UID, group_gid)
     except SetupError:
         raise
-    archive_dir = ARCHIVE_DIR.format(BASE_DIR, fqdn)
-    key_dir = KEY_DIR.format(BASE_DIR, fqdn)
-    live_dir = LIVE_DIR.format(BASE_DIR, fqdn)
+    format_settings = {'base': BASE_DIR, 'fqdn': fqdn}
+    archive_dir = ARCHIVE_DIR.format(**format_settings)
+    key_dir = KEY_DIR.format(**format_settings)
+    live_dir = LIVE_DIR.format(**format_settings)
     cert_path = os.path.join(live_dir, CERT_FILENAME)
 
     if new_cert_needed(cert_path):
@@ -309,8 +312,9 @@ def checkgen_main(args):
                                              DIR_MODE,
                                              OWNER_UID,
                                              group_gid)
+        new_key_dir = os.path.join(key_dir, new_version)
         csr = generate(fqdn,
-                       key_dir,
+                       new_key_dir,
                        DEFAULT_KEY_LENGTH,
                        KEY_MODE, OWNER_UID,
                        group_gid)
@@ -319,6 +323,17 @@ def checkgen_main(args):
             logger.error('Error sending CSR to salt master!')
     else:
         logger.info('Cert Status: OK.')
+
+
+def list_main(args):
+    fqdn = platform.node()
+    if not fqdn:
+        raise SetupError('Missing FQDN!')
+    format_settings = {'base': BASE_DIR, 'fqdn': fqdn}
+    archive_dir = ARCHIVE_DIR.format(**format_settings)
+    key_dir = KEY_DIR.format(**format_settings)
+    for version in sorted(get_version_dirs([archive_dir, key_dir])):
+        print(version)
 
 
 def setup_logger(logger, interactive=False, default_level=logging.INFO):
@@ -340,6 +355,9 @@ def main():
     parser_checkgen = sub_parsers.add_parser('checkgen', help='checkgen help')
     #parser_checkgen.add_argument
     parser_checkgen.set_defaults(main_func=checkgen_main)
+
+    parser_list = sub_parsers.add_parser('list', help='list help')
+    parser_list.set_defaults(main_func=list_main)
 
     args = parser.parse_args(sys.argv[1:])
     setup_logger(logger)

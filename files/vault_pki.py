@@ -89,6 +89,11 @@ SALT_EVENT_TAG = 'request/sign'
 logger = logging.getLogger(__file__)
 
 
+class ActivationError(Exception):
+    """Exception class for errors during new version activation."""
+    pass
+
+
 class SetupError(Exception):
     """Exception class for errors during environment setup."""
     pass
@@ -269,10 +274,112 @@ def new_cert_needed(cert_path, refresh_at=0.5):
     return get_new_cert
 
 
-def send_cert_request(event_tag, version, csr):
+def send_cert_request(event_tag, dest_cert_path, csr):
     """Send CSR to the salt master."""
     caller = salt_client.Caller()
-    return caller.cmd('event.send', event_tag, version=version, csr=csr)
+    return caller.cmd('event.send',
+                      event_tag,
+                      csr=csr,
+                      dest_cert_path=dest_cert_path)
+
+
+def _atomic_link_switch(source, destination):
+    raise NotImplementedError
+
+
+def _activate_version(version_str):
+
+        live_key_path = path_join([live_dir, KEY_FILENAME])
+        live_cert_path = path_join([live_dir, CERT_FILENAME])
+        live_chain_path = path_join([live_dir, FULLCHAIN_FILENAME])
+        try:
+            _atomic_link_switch(new_key_path, live_key_path)
+            _atomic_link_switch(new_cert_path, live_cert_path)
+            _atomic_link_switch(new_chain_path, live_chain_path)
+        except ActivationError:
+            logger.critical(
+                'Failed to activate "{}"!'.format(
+                    version_str)
+            )
+            # activate_version(old_version, initial_run=False)
+            raise
+
+
+def _activate_version_with_rollback():
+    raise NotImplementedError
+
+
+def _get_current_version(live_dir):
+    """Returns the current certificate/key version or None."""
+    versions = set()
+    missing = set()
+    expected_files = {CERT_FILENAME, FULLCHAIN_FILENAME, KEY_FILENAME}
+    for filename in expected_files:
+        link_path = os.path.join([live_dir, filename])
+        try:
+            real_path = os.readlink(link_path)
+        except OSError:
+            missing.add(filename)
+            continue
+        version_dir = os.path.basename(os.path.dirname(real_path))
+        if version_dir:
+            versions.add(version_dir)
+        else:
+            logger.warning(
+                'Live file parent directory ({}) is empty string.'.format(
+                   real_path)
+            )
+            continue
+    if missing == expected_files:
+        logger.info('No live cert/key material, fresh install.')
+        return None
+    if versions and len(versions) > 1:
+        logger.error(
+            'Versions >1 or invalid, continuing with no rollback:\n{}'.format(
+                '\n'.join(versions))
+        )
+        return None
+    else:
+        return versions.pop()
+
+
+def activate_main(args):
+    """Switch the live symlinks for cert/key/chain to the given version."""
+    path_join = os.path.join
+    is_dir = os.path.isdir
+
+    fqdn = platform.node()
+    format_settings = {'base': BASE_DIR, 'fqdn': fqdn}
+    live_dir = LIVE_DIR.format(**format_settings)
+    archive_dir = ARCHIVE_DIR.format(**format_settings)
+    key_dir = KEY_DIR.format(**format_settings)
+
+    old_version = _get_current_version(live_dir)
+    archive_version_dir = path_join([archive_dir, version_str])
+    key_version_dir = path_join([key_dir, version_str])
+    if not (is_dir(archive_version_dir) and is_dir(key_version_dir)):
+        logger.critical(
+            'Directory tree invalid or missing for version "{}":\n{}'.format(
+                version_str,
+                '\n'.join([archive_version_dir, key_version_dir]))
+        )
+        sys.exit(1)
+    new_key_path = path_join([key_version_dir, KEY_FILENAME])
+    new_cert_path = path_join([archive_version_dir, CERT_FILENAME])
+    new_chain_path = path_join([archive_version_dir, FULLCHAIN_FILENAME])
+    access_ok = [os.access(path, os.R_OK)
+                 for path in (new_key_path, new_cert_path, new_chain_path)]
+    if not all(access_ok):
+        logger.critical(
+            'Unable to all read necessary files:\n{}'.format(
+                [new_key_path, new_cert_path, new_chain_path])
+        )
+        sys.exit(1)
+    if not os.access(live_dir, os.W_OK):
+        logger.critical(
+            'Unable to write to live directory:\n{}'.format(live_dir)
+        )
+        sys.exit(1)
 
 
 def checkgen_main(args):
@@ -318,7 +425,8 @@ def checkgen_main(args):
                        DEFAULT_KEY_LENGTH,
                        KEY_MODE, OWNER_UID,
                        group_gid)
-        sent_ok = send_cert_request(SALT_EVENT_TAG, new_version, csr)
+        new_archive_dir = os.path.join(archive_dir, new_version)
+        sent_ok = send_cert_request(SALT_EVENT_TAG, new_archive_dir, csr)
         if not sent_ok:
             logger.error('Error sending CSR to salt master!')
     else:

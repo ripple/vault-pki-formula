@@ -2,23 +2,91 @@
 # -*- coding: utf-8 -*-
 # vim: tabstop=4 expandtab shiftwidth=4 softtabstop=4
 
-"""
+"""Command for managing a cert issued by way of the salt-master.
+
+This command was written with the intention of the Salt master ferrying
+the certificate signing request (CSR) to a Vault PKI backend.  That
+functionality is included in a separate Salt runner which is expected to
+write the resulting certificate and full certificate chain back onto the
+requesting minion.
+
+This command is intended to be used in a headless fashion where it
+is run in a cron job, perhaps daily.  'checkgen' is the command to
+check the existing certificate and determine if a new one is needed.
+By default a new certificate is requested when the issued one is 50%
+of the way through it's validity period.
+
+A particular directory tree structure is used, based off of the Certbot
+project:
+
+/etc/vault_pki/
+           archive/
+                   myhostname/
+                              0001/
+                                   cert.pem
+                                   fullchain.pem
+           keys/
+                myhostname/
+                           0001/
+                                key.pem
+           live/
+                myhostname/
+                       cert.pem -> <base>/archive/myhostname/0001/cert.pem
+                ...
+
+In this example '0001' refers to the first cert/key material version.
+And versions are scoped underneath a hostname in the event of hostname
+changes or the desire to have multiple certs (not really supported yet).
+
+The 'live' directory under /etc/vault_pki is also scoped by hostname but
+contains only symbolic links to the current (live) cert/key and fullchain.
+
+
+Summary of sub-command operation:
 
 checkgen
-
-- check for existing directory structure and cert/key
-  - create the former if missing
-
-- read existing certificate and request new if validity period > 50% over
+    - Check for existing directory structure (/etc/vault_pki) and for a
+      current live certificate and key.
+    - Create the directory structure if it is missing.
+    - If there is an existing certificate check if period remaining is
+      less than 50% of the issued valid duration.
+        - If the certificate is missing or sufficiently old determine
+          a new version number and create new version directories.
+        - Generate a key and certificate signing request (CSR), writing
+          the former into the new keys version directory.
+        - Send the CSR in a Salt event call to the Salt master onward
+          to be signed (with a return path to write the certificate at).
+    - Otherwise if certificate is in OK, log that and exit.
 
 activate
+    - Takes a version number as an argument.
+    - If the version number looks like a version number (four digits),
+      has existing directories and all of the requisite files, *and*
+      those files are readable and the current live directory is
+      writable -- then the live symlinks are switched to the specified
+      version.
+    - If an error occurs during the course of switching *any* symlink
+      they will attempt to switch back to the last seen version. This
+      is an to maintain a consistent state of the presented key and
+      certificate.
 
-- takes an argument of a subdir of cert directory structure and if it is
-  valid switches the sym-link
+lists
+    - Prints a list of available cert/key versions and marks the active
+      version with a '*'.
 
-list
 
-- lists available cert/key pairs under directory structure
+Things that could be improved / Ways to help:
+
+    - move logging to syslog/etc when non-interactive
+    - unittests!!!
+    - more debug logging
+    - more traceback logging
+    - better logging in general
+    - detect when a rollback is a no-operation and skip, for cases
+      where the very first symlink switch fails and there are no
+      changes to roll back.
+    - CLI options, validity period to refresh, write out CSR, base_dir,
+      fqdn, verbose, print active version for list, etc.
 """
 
 from __future__ import absolute_import
@@ -75,8 +143,8 @@ DIR_TREE = [
     KEY_DIR,
 ]
 
-DIR_MODE = 0750
-KEY_MODE = 0640
+DIR_MODE = 0o750
+KEY_MODE = 0o640
 
 KEY_FILENAME = 'privkey.pem'
 CERT_FILENAME = 'cert.pem'
@@ -260,7 +328,7 @@ def new_cert_needed(cert_path, refresh_at=0.5):
     else:
         with open(cert_path, 'r') as certfile:
             cert = x509.load_pem_x509_certificate(
-                certfile.read(),
+                six.b(certfile.read()),
                 default_backend())
         validity_period = cert.not_valid_after - cert.not_valid_before
         refresh_offset = datetime.timedelta(validity_period.days * refresh_at)
@@ -333,34 +401,34 @@ def _activate_version_with_rollback(version_str, live_dir):
     Records the current cert/key version before activation and if it
     is sane attempts to restore it in the event of an error occuring.
     """
-    rollback_possible = False
+    rollback_ok = False
     old_version = _get_current_version(live_dir)
     if old_version is not None:
-        rollback_possible = True
+        rollback_ok = True
     else:
         logger.warning(
             'Rollback not possible -- no valid prior version found.'
         )
-    def _run_activate(version, live_dir):
+    def _run_activate(version, live_dir, rollback_ok):
         """Run activation such that rollback has a try/except block."""
         try:
             _activate_version(version, live_dir)
             logger.info('Successfully activated version "{}".'.format(
                 version))
         except ActivationError:
-            if rollback_possible:
+            if rollback_ok:
                 logger.warning(
                     'Activate raised an error. Rolling back to "{}"'.format(
                         old_version)
                 )
-                rollback_possible = False
-                return _run_activate(old_version, live_dir)
+                rollback_ok = False
+                return _run_activate(old_version, live_dir, rollback_ok)
             else:
                 logger.error('Activate raised an uncorrectable error.')
                 raise
         else:
             return version
-    return _run_activate(version_str, live_dir)
+    return _run_activate(version_str, live_dir, rollback_ok)
 
 
 def _get_current_version(live_dir):
@@ -546,6 +614,7 @@ def setup_logger(logger, interactive=False, default_level=logging.INFO):
 
 
 def main():
+    """Setup arguments and run main functions for sub-commands."""
     parser = argparse.ArgumentParser(prog='vault_pki')
     sub_parsers = parser.add_subparsers(help='sub-command help')
 

@@ -4,6 +4,13 @@
 include:
   - python.pip
 
+setup new cert-access group:
+  group.present:
+    - name: cert-access
+    - members:
+      - www-data
+      - postfix
+
 install crypto dependencies:
   pkg.installed:
     - pkgs:

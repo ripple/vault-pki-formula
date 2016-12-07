@@ -280,45 +280,108 @@ def send_cert_request(event_tag, dest_cert_path, csr):
     return caller.cmd('event.send',
                       event_tag,
                       csr=csr,
-                      dest_cert_path=dest_cert_path)
+                      path=dest_cert_path)
 
 
 def _atomic_link_switch(source, destination):
-    raise NotImplementedError
+    """Does an atomic symlink swap by overwriting the destination symlink.
+
+    Creates a temporary symlink to the source and overwrites the
+    destination symlink.  The rename system call is atomic under Linux.
+    Uses the current time as a timestamp as the temporary symlink suffix.
+
+    TODO: figure out best way to clean up temp symlinks in the event of
+    failure.
+    """
+    now = datetime.datetime.now()
+    swap_suffix = now.strftime('%s')
+    temp_destination = '{}-{}'.format(destination, swap_suffix)
+    try:
+        os.symlink(source, temp_destination)
+        os.rename(temp_destination, destination)
+    except (OSError, IOError, SystemError):
+        raise ActivationError('Failed symlink swap from "{}" to "{}"'.format(
+            source, destination))
 
 
-def _activate_version(version_str):
+def _activate_version(version_str, live_dir):
+    """Activates a given cert/key version by switching the live symlinks.
 
-        live_key_path = path_join([live_dir, KEY_FILENAME])
-        live_cert_path = path_join([live_dir, CERT_FILENAME])
-        live_chain_path = path_join([live_dir, FULLCHAIN_FILENAME])
+    Errors if any of the new version symlinks cannot be swapped in - so
+    as to be able to trigger a rollback to a stable version.
+    """
+    live_key_path = os.path.join(live_dir, KEY_FILENAME)
+    live_cert_path = os.path.join(live_dir, CERT_FILENAME)
+    live_chain_path = os.path.join(live_dir, FULLCHAIN_FILENAME)
+    cert_path, chain_path, key_path = _get_version_assets(version_str)
+    try:
+        _atomic_link_switch(key_path, live_key_path)
+        _atomic_link_switch(cert_path, live_cert_path)
+        _atomic_link_switch(chain_path, live_chain_path)
+    except ActivationError:
+        logger.critical(
+            'Failed to activate "{}"!'.format(
+                version_str)
+        )
+        logger.critical(exc_info=True)
+        raise
+
+
+def _activate_version_with_rollback(version_str, live_dir):
+    """Activate a cert/key version but rollback to if errors occur.
+
+    Records the current cert/key version before activation and if it
+    is sane attempts to restore it in the event of an error occuring.
+    """
+    rollback_possible = False
+    old_version = _get_current_version(live_dir)
+    if old_version is not None:
+        rollback_possible = True
+    else:
+        logger.warning(
+            'Rollback not possible -- no valid prior version found.'
+        )
+    def _run_activate(version, live_dir):
+        """Run activation such that rollback has a try/except block."""
         try:
-            _atomic_link_switch(new_key_path, live_key_path)
-            _atomic_link_switch(new_cert_path, live_cert_path)
-            _atomic_link_switch(new_chain_path, live_chain_path)
+            _activate_version(version, live_dir)
+            logger.info('Successfully activated version "{}".'.format(
+                version))
         except ActivationError:
-            logger.critical(
-                'Failed to activate "{}"!'.format(
-                    version_str)
-            )
-            # activate_version(old_version, initial_run=False)
-            raise
-
-
-def _activate_version_with_rollback():
-    raise NotImplementedError
+            if rollback_possible:
+                logger.warning(
+                    'Activate raised an error. Rolling back to "{}"'.format(
+                        old_version)
+                )
+                rollback_possible = False
+                return _run_activate(old_version, live_dir)
+            else:
+                logger.error('Activate raised an uncorrectable error.')
+                raise
+        else:
+            return version
+    return _run_activate(version_str, live_dir)
 
 
 def _get_current_version(live_dir):
-    """Returns the current certificate/key version or None."""
+    """Returns the current certificate/key version or None.
+
+    Also returns None in the event of the initial installation of the
+    cert in which there is no reasonable rollback.  Inconsistent
+    installations, those with many versions, also return None as they
+    are presumed broken and not a safe rollback target.
+    """
     versions = set()
     missing = set()
     expected_files = {CERT_FILENAME, FULLCHAIN_FILENAME, KEY_FILENAME}
     for filename in expected_files:
-        link_path = os.path.join([live_dir, filename])
+        link_path = os.path.join(live_dir, filename)
         try:
             real_path = os.readlink(link_path)
         except OSError:
+            logger.debug(
+                'Missing or broken symlink from "{}".'.format(link_path)
+            )
             missing.add(filename)
             continue
         version_dir = os.path.basename(os.path.dirname(real_path))
@@ -327,7 +390,7 @@ def _get_current_version(live_dir):
         else:
             logger.warning(
                 'Live file parent directory ({}) is empty string.'.format(
-                   real_path)
+                    real_path)
             )
             continue
     if missing == expected_files:
@@ -343,43 +406,63 @@ def _get_current_version(live_dir):
         return versions.pop()
 
 
-def activate_main(args):
-    """Switch the live symlinks for cert/key/chain to the given version."""
+def _get_version_assets(version_str, fqdn=None, base_dir=BASE_DIR):
+    """Given a version string fetch the associated key and cert files.
+
+    In the event the specified version directories are not in place, or
+    the files readable an ActivationError is thrown.
+    """
     path_join = os.path.join
     is_dir = os.path.isdir
+    if not fqdn:
+        fqdn = platform.node()
+    format_settings = {'base': base_dir, 'fqdn': fqdn}
+    archive_dir = ARCHIVE_DIR.format(**format_settings)
+    key_dir = KEY_DIR.format(**format_settings)
+    archive_version_dir = path_join(archive_dir, version_str)
+    key_version_dir = path_join(key_dir, version_str)
+    if not (is_dir(archive_version_dir) and is_dir(key_version_dir)):
+        err = 'Directory tree invalid or missing for version "{}":\n{}'.format(
+            version_str,
+            '\n'.join([archive_version_dir, key_version_dir]))
+        logger.critical(err)
+        raise ActivationError(err)
+    key_path = path_join(key_version_dir, KEY_FILENAME)
+    cert_path = path_join(archive_version_dir, CERT_FILENAME)
+    chain_path = path_join(archive_version_dir, FULLCHAIN_FILENAME)
+    access_ok = [os.access(path, os.R_OK)
+                 for path in (key_path, cert_path, chain_path)]
+    if not all(access_ok):
+        err = 'Unable to *all* read necessary files:\n{}'.format(
+            [key_path, cert_path, chain_path]
+        )
+        logger.critical(err)
+        raise ActivationError(err)
+    return (cert_path, chain_path, key_path)
 
+
+def activate_main(args):
+    """Switch the live symlinks for cert/key/chain to the given version.
+
+    Activates a provided version of the cert/key material by switching
+    symbolic links - in a gestalt manner as possible.  Including the
+    ability to 'rollback' to the last set version if switching any one
+    of the symlinks fails.
+    """
+    version_str = args.version[0]
+    if not re.match(VERSION_DIR_REGEX, version_str):
+        logger.critical('Invalid version string.')
+        sys.exit(1)
     fqdn = platform.node()
     format_settings = {'base': BASE_DIR, 'fqdn': fqdn}
     live_dir = LIVE_DIR.format(**format_settings)
-    archive_dir = ARCHIVE_DIR.format(**format_settings)
-    key_dir = KEY_DIR.format(**format_settings)
-
-    old_version = _get_current_version(live_dir)
-    archive_version_dir = path_join([archive_dir, version_str])
-    key_version_dir = path_join([key_dir, version_str])
-    if not (is_dir(archive_version_dir) and is_dir(key_version_dir)):
-        logger.critical(
-            'Directory tree invalid or missing for version "{}":\n{}'.format(
-                version_str,
-                '\n'.join([archive_version_dir, key_version_dir]))
-        )
-        sys.exit(1)
-    new_key_path = path_join([key_version_dir, KEY_FILENAME])
-    new_cert_path = path_join([archive_version_dir, CERT_FILENAME])
-    new_chain_path = path_join([archive_version_dir, FULLCHAIN_FILENAME])
-    access_ok = [os.access(path, os.R_OK)
-                 for path in (new_key_path, new_cert_path, new_chain_path)]
-    if not all(access_ok):
-        logger.critical(
-            'Unable to all read necessary files:\n{}'.format(
-                [new_key_path, new_cert_path, new_chain_path])
-        )
-        sys.exit(1)
     if not os.access(live_dir, os.W_OK):
         logger.critical(
             'Unable to write to live directory:\n{}'.format(live_dir)
         )
         sys.exit(1)
+    set_version = _activate_version_with_rollback(version_str, live_dir)
+    logger.info('Set version "{}" to active.'.format(set_version))
 
 
 def checkgen_main(args):
@@ -440,8 +523,14 @@ def list_main(args):
     format_settings = {'base': BASE_DIR, 'fqdn': fqdn}
     archive_dir = ARCHIVE_DIR.format(**format_settings)
     key_dir = KEY_DIR.format(**format_settings)
+    live_dir = LIVE_DIR.format(**format_settings)
+
+    current_version = _get_current_version(live_dir)
     for version in sorted(get_version_dirs([archive_dir, key_dir])):
-        print(version)
+        if version == current_version:
+            print('{} *'.format(version))
+        else:
+            print(version)
 
 
 def setup_logger(logger, interactive=False, default_level=logging.INFO):
@@ -461,11 +550,16 @@ def main():
     sub_parsers = parser.add_subparsers(help='sub-command help')
 
     parser_checkgen = sub_parsers.add_parser('checkgen', help='checkgen help')
-    #parser_checkgen.add_argument
     parser_checkgen.set_defaults(main_func=checkgen_main)
 
     parser_list = sub_parsers.add_parser('list', help='list help')
     parser_list.set_defaults(main_func=list_main)
+
+    parser_activate = sub_parsers.add_parser('activate', help='activate help')
+    parser_activate.add_argument('version',
+                                 nargs=1,
+                                 help='Version to activate.')
+    parser_activate.set_defaults(main_func=activate_main)
 
     args = parser.parse_args(sys.argv[1:])
     setup_logger(logger)

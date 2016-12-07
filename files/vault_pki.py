@@ -344,12 +344,13 @@ def new_cert_needed(cert_path, refresh_at=0.5):
     return get_new_cert
 
 
-def send_cert_request(event_tag, dest_cert_path, csr):
+def send_cert_request(event_tag, new_version, dest_cert_path, csr):
     """Send CSR to the salt master."""
     caller = salt_client.Caller()
     return caller.cmd('event.send',
                       event_tag,
                       csr=csr,
+                      version=new_version,
                       path=dest_cert_path)
 
 
@@ -579,7 +580,10 @@ def checkgen_main(args):
                        KEY_MODE, OWNER_UID,
                        group_gid)
         new_archive_dir = os.path.join(archive_dir, new_version)
-        sent_ok = send_cert_request(SALT_EVENT_TAG, new_archive_dir, csr)
+        sent_ok = send_cert_request(SALT_EVENT_TAG,
+                                    new_version,
+                                    new_archive_dir,
+                                    csr)
         if not sent_ok:
             logger.error('Error sending CSR to salt master!')
     else:

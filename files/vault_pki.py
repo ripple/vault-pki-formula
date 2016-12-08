@@ -522,7 +522,7 @@ def activate_main(args):
     """
     version_str = args.version[0]
     if not re.match(VERSION_DIR_REGEX, version_str):
-        logger.critical('Invalid version string.')
+        logger.critical('Invalid version string: "{}"'.format(version_str))
         sys.exit(1)
     fqdn = platform.node()
     format_settings = {'base': BASE_DIR, 'fqdn': fqdn}

@@ -30,7 +30,7 @@ install python cryptography module:
     - source: salt://cert/files/vault_pki.py
     - user: root
     - group: root
-    - mode: 755
+    - mode: 0755
 
 checkgen_cert:
   cron.present:

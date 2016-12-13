@@ -2,7 +2,7 @@
 
 run_activate_command:
   cmd.run:
-    - name: /usr/local/bin/vault_pki.py activate {{ version }}
+    - name: /usr/local/bin/vault_pki activate {{ version }}
 
 update_current_file:
   file.managed:

@@ -13,5 +13,5 @@ update_current_file:
     - contents: "{{ version }}"
     - require:
       - cmd: run_activate_command
-    #- watch_in:
-    #  - nginx
+    - watch_in:
+      - service: nginx_service

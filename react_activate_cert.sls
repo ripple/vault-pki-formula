@@ -1,4 +1,4 @@
-{% set version = salt.pillar.get('version') %}
+{% set version = salt['pillar.get']('version') %}
 
 run_activate_command:
   cmd.run:

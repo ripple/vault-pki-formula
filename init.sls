@@ -8,6 +8,7 @@ setup new cert-access group:
   group.present:
     - name: cert-access
     - members:
+      - logstash
       - www-data
       - postfix
 

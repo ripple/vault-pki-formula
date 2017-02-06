@@ -28,7 +28,8 @@ project:
            keys/
                 myhostname/
                            0001/
-                                key.pem
+                                privkey.pem
+                                privkey.pkcs8
            live/
                 myhostname/
                        cert.pem -> <base>/archive/myhostname/0001/cert.pem
@@ -404,7 +405,7 @@ def _activate_version(version_str, live_dir):
      pkcs8_key_path) = _get_version_assets(version_str)
     try:
         _atomic_link_switch(key_path, live_key_path)
-        _atomic_link_switch(pkcs8_key_path, live_key_path)
+        _atomic_link_switch(pkcs8_key_path, live_pkcs8_key_path)
         _atomic_link_switch(cert_path, live_cert_path)
         _atomic_link_switch(chain_path, live_chain_path)
     except ActivationError:

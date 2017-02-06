@@ -7,8 +7,7 @@ include:
 setup new cert-access group:
   group.present:
     - name: cert-access
-    - members:
-      - logstash
+    - addusers:
       - www-data
       - postfix
 

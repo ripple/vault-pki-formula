@@ -147,10 +147,17 @@ DIR_MODE = 0o750
 KEY_MODE = 0o640
 
 KEY_FILENAME = 'privkey.pem'
+PKCS8_KEY_FILENAME = 'privkey.pkcs8'
 CERT_FILENAME = 'cert.pem'
 FULLCHAIN_FILENAME = 'fullchain.pem'
 
 DEFAULT_KEY_LENGTH = 2048
+
+# Map key files to their serialization format
+KEY_FILENAME_TO_FORMAT = {
+    KEY_FILENAME: serialization.PrivateFormat.TraditionalOpenSSL,
+    PKCS8_KEY_FILENAME: serialization.PrivateFormat.PKCS8,
+}
 
 SALT_EVENT_TAG = 'request/sign'
 
@@ -221,17 +228,23 @@ def generate(fqdn, write_dir, key_length, mode, owner_uid, group_gid):
         public_exponent=public_exp,
         key_size=key_length,
         backend=default_backend())
-    priv_key_filepath = os.path.join(write_dir, KEY_FILENAME)
-    try:
-        with open(priv_key_filepath, 'w') as keyfile:
-            keyfile.write(priv_key.private_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PrivateFormat.TraditionalOpenSSL,
-                encryption_algorithm=serialization.NoEncryption()))
-        os.chmod(priv_key_filepath, mode)
-        os.chown(priv_key_filepath, owner_uid, group_gid)
-    except IOError:
-        raise GenerationError('Error writing key file {}'.format(keyfile))
+    for key_filename in (KEY_FILENAME, PKCS8_KEY_FILENAME):
+        key_format = KEY_FILENAME_TO_FORMAT.get(key_filename)
+        if not key_format:
+            raise GenerationError(
+                'Invalid key format for file {}'.format(key_filename)
+            )
+        priv_key_filepath = os.path.join(write_dir, key_filename)
+        try:
+            with open(priv_key_filepath, 'w') as keyfile:
+                keyfile.write(priv_key.private_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=key_format,
+                    encryption_algorithm=serialization.NoEncryption()))
+            os.chmod(priv_key_filepath, mode)
+            os.chown(priv_key_filepath, owner_uid, group_gid)
+        except IOError:
+            raise GenerationError('Error writing key file {}'.format(keyfile))
     builder = x509.CertificateSigningRequestBuilder()
     common_name = x509.NameAttribute(
         x509.oid.NameOID.COMMON_NAME,
@@ -382,11 +395,16 @@ def _activate_version(version_str, live_dir):
     as to be able to trigger a rollback to a stable version.
     """
     live_key_path = os.path.join(live_dir, KEY_FILENAME)
+    live_pkcs8_key_path = os.path.join(live_dir, PKCS8_KEY_FILENAME)
     live_cert_path = os.path.join(live_dir, CERT_FILENAME)
     live_chain_path = os.path.join(live_dir, FULLCHAIN_FILENAME)
-    cert_path, chain_path, key_path = _get_version_assets(version_str)
+    (cert_path,
+     chain_path,
+     key_path,
+     pkcs8_key_path) = _get_version_assets(version_str)
     try:
         _atomic_link_switch(key_path, live_key_path)
+        _atomic_link_switch(pkcs8_key_path, live_key_path)
         _atomic_link_switch(cert_path, live_cert_path)
         _atomic_link_switch(chain_path, live_chain_path)
     except ActivationError:
@@ -444,7 +462,10 @@ def _get_current_version(live_dir):
     """
     versions = set()
     missing = set()
-    expected_files = {CERT_FILENAME, FULLCHAIN_FILENAME, KEY_FILENAME}
+    expected_files = {CERT_FILENAME,
+                      FULLCHAIN_FILENAME,
+                      KEY_FILENAME,
+                      PKCS8_KEY_FILENAME}
     for filename in expected_files:
         link_path = os.path.join(live_dir, filename)
         try:
@@ -498,18 +519,20 @@ def _get_version_assets(version_str, fqdn=None, base_dir=BASE_DIR):
             '\n'.join([archive_version_dir, key_version_dir]))
         logger.critical(err)
         raise ActivationError(err)
+
     key_path = path_join(key_version_dir, KEY_FILENAME)
+    pkcs8_key_path = path_join(key_version_dir, PKCS8_KEY_FILENAME)
     cert_path = path_join(archive_version_dir, CERT_FILENAME)
     chain_path = path_join(archive_version_dir, FULLCHAIN_FILENAME)
     access_ok = [os.access(path, os.R_OK)
-                 for path in (key_path, cert_path, chain_path)]
+                 for path in (key_path, pkcs8_key_path, cert_path, chain_path)]
     if not all(access_ok):
         err = 'Unable to *all* read necessary files:\n{}'.format(
-            [key_path, cert_path, chain_path]
+            [key_path, pkcs8_key_path, cert_path, chain_path]
         )
         logger.critical(err)
         raise ActivationError(err)
-    return (cert_path, chain_path, key_path)
+    return (cert_path, chain_path, key_path, pkcs8_key_path)
 
 
 def activate_main(args):

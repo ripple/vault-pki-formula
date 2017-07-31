@@ -7,9 +7,6 @@ include:
 setup new cert-access group:
   group.present:
     - name: cert-access
-    - addusers:
-      - www-data
-      - postfix
 
 install crypto dependencies:
   pkg.installed:

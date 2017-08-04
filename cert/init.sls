@@ -11,9 +11,15 @@ setup new cert-access group:
 install crypto dependencies:
   pkg.installed:
     - pkgs:
+{% if grains['os_family'] == 'Debian' -%}
       - python-dev
       - libssl-dev
       - libffi-dev
+{% elif grains['os_family'] == 'Redhat' -%}
+      - python-devel
+      - libffi-devel
+      - openssl-libs
+{% endif -%}
 
 install python cryptography module:
   pip.installed:

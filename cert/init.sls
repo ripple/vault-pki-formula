@@ -24,6 +24,11 @@ install crypto dependencies:
 install python cryptography module:
   pip.installed:
     - name: cryptography
+{% if grains['os_family'] == 'Debian' -%}
+    - bin_env: /usr/local/bin/pip2
+{% elif grains['os_family'] == 'RedHat' -%}
+    - bin_env: /usr/bin/pip2
+{% endif -%}
     - reload_modules: true
     - require:
       - cmd: install_pip2

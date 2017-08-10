@@ -15,7 +15,7 @@ install crypto dependencies:
       - python-dev
       - libssl-dev
       - libffi-dev
-{% elif grains['os_family'] == 'Redhat' -%}
+{% elif grains['os_family'] == 'RedHat' -%}
       - python-devel
       - libffi-devel
       - openssl-libs

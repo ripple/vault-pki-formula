@@ -106,6 +106,7 @@ import platform
 import re
 import stat
 import sys
+import subprocess
 
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
@@ -161,6 +162,7 @@ KEY_FILENAME_TO_FORMAT = {
 }
 
 SALT_EVENT_TAG = 'request/sign'
+SALT_EVENT_NAME = 'request/revoke'
 
 logger = logging.getLogger(__file__)
 
@@ -437,6 +439,8 @@ def _activate_version_with_rollback(version_str, live_dir):
             _activate_version(version, live_dir)
             logger.info('Successfully activated version "{}".'.format(
                 version))
+	    send_serial_salt_master(old_version)
+
         except ActivationError:
             if rollback_ok:
                 logger.warning(
@@ -642,6 +646,45 @@ def setup_logger(logger, interactive=False, default_level=logging.INFO):
     log_handler.setLevel(default_level)
     logger.addHandler(log_handler)
 
+def send_serial_salt_master(version_str):
+    #fetch the serial number of the certificate of the older version
+    (cert_path,
+     chain_path,
+     key_path,
+     pkcs8_key_path) = _get_version_assets(version_str)    
+
+    # cert_path has the certificat whose serial number is to be fetched
+    if not os.access(cert_path, os.F_OK):
+        logger.info('Cert status: missing.')
+    else:
+        #with open(cert_path, 'r') as certfile:
+        #    cert = x509.load_pem_x509_certificate(
+        #        six.b(certfile.read()),
+        #        default_backend())
+       
+        proc = subprocess.Popen(["openssl x509 -in "+ cert_path+" -serial -noout"], stdout=subprocess.PIPE, shell=True)
+       (out, err) = proc.communicate()
+       
+    serialNum = out.strip().split('=')[1]
+
+    #serialNum = cert.serial_number
+    print("Serial Number of old certificate: " +serialNum)
+
+    sent_ok = send_cert_revoke_request(
+			SALT_EVENT_NAME,
+                        serialNum,
+                        mount_point)
+    if not sent_ok:
+       logger.error('Error sending Serial Number of the certificate to salt master!')
+
+
+def send_cert_revoke_request(event_name, serialNum, mount_point):
+    """Send Serial Number of the certificate to the salt master."""
+    caller = salt_client.Caller()
+    return caller.cmd('event.send',
+                      event_name,
+                      serialNum=old_version,
+                      mount=mount_point)
 
 def main():
     """Setup arguments and run main functions for sub-commands."""

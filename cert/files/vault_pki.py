@@ -106,7 +106,6 @@ import platform
 import re
 import stat
 import sys
-import subprocess
 
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
@@ -657,17 +656,13 @@ def send_serial_salt_master(version_str):
     if not os.access(cert_path, os.F_OK):
         logger.info('Cert status: missing.')
     else:
-        #with open(cert_path, 'r') as certfile:
-        #    cert = x509.load_pem_x509_certificate(
-        #        six.b(certfile.read()),
-        #        default_backend())
+        with open(cert_path, 'r') as certfile:
+            cert = x509.load_pem_x509_certificate(
+                six.b(certfile.read()),
+                default_backend())
        
-        proc = subprocess.Popen(["openssl x509 -in "+ cert_path+" -serial -noout"], stdout=subprocess.PIPE, shell=True)
-       (out, err) = proc.communicate()
-       
-    serialNum = out.strip().split('=')[1]
-
-    #serialNum = cert.serial_number
+    serialNum = '{0:x}'.format(int(cert.serial))
+    serialNum = ':'.join(serialNum[i:i+2] for i in range(0, len(serialNum), 2))
     print("Serial Number of old certificate: " +serialNum)
 
     sent_ok = send_cert_revoke_request(

@@ -679,9 +679,9 @@ def send_cert_revoke_request(event_name, serialNum, mount):
     """Send Serial Number of the certificate to the salt master."""
     caller = salt_client.Caller()
     print("Sending event to master to revoke the old certificate")
-    
+    print(event_name)
     return caller.cmd('event.send',
-                      event_name.strip(),
+                      event_name,
                       serialNum=serialNum,
                       mount=mount)
 

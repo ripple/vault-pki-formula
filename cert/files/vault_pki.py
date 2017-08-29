@@ -665,21 +665,25 @@ def send_serial_salt_master(version_str):
     serialNum = ':'.join(serialNum[i:i+2] for i in range(0, len(serialNum), 2))
     print("Serial Number of old certificate: " +serialNum)
 
+    mount = "vpn-client-pki"
     sent_ok = send_cert_revoke_request(
 			SALT_EVENT_NAME,
                         serialNum,
-                        mount_point)
+                        mount)
+    print(sent_ok)
     if not sent_ok:
        logger.error('Error sending Serial Number of the certificate to salt master!')
 
 
-def send_cert_revoke_request(event_name, serialNum, mount_point):
+def send_cert_revoke_request(event_name, serialNum, mount):
     """Send Serial Number of the certificate to the salt master."""
     caller = salt_client.Caller()
+    print("Sending event to master to revoke the old certificate")
+    
     return caller.cmd('event.send',
-                      event_name,
-                      serialNum=old_version,
-                      mount=mount_point)
+                      event_name.strip(),
+                      serialNum=serialNum,
+                      mount=mount)
 
 def main():
     """Setup arguments and run main functions for sub-commands."""

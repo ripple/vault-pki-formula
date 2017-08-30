@@ -10,14 +10,6 @@ push_signed_cert:
         {{ payload['csr']|indent(8, false) }}
       path: {{ payload['path'] }}
 
-revoke_old_cert:
-  salt.runner"
-    - name: vault_add_cert_crl.main
-    - kwargs:
-      host: {{ target }}
-      serialNum: {{ payload['serialNum'] }}
-      mount: {{ payload['mount'] }}
-
 activate_new_version:
   salt.state:
     - tgt: {{ target }}
@@ -28,4 +20,3 @@ activate_new_version:
         version: "{{ payload['version'] }}"
     - require:
       - salt: push_signed_cert
-      - salt: revoke_old_cert

@@ -1,4 +1,5 @@
-{% set event_data = data.get('data') %}
+{% set payload = salt.pillar.get('event_data') %}
+{% set target = salt.pillar.get('event_target') %}
 
 revoke_old_cert:
   salt.runner:

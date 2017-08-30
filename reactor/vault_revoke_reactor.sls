@@ -7,7 +7,6 @@ revoke_old_cert:
         # necessary to encode data as json to avoid escaping
         event_data: {{ event_data | json() }}
     - kwargs:
-      serialNum: {{ event_data['serialNum'] }}
-      mount: {{ event_data['mount'] }}
+      serialNum: event_data
 
 

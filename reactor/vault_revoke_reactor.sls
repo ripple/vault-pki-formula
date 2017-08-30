@@ -1,10 +1,11 @@
 {% set event_data = data.get('data') %}
 
-revoke_old_cert_orchestra:
-  runner.state.orchestrate:
-    - mods: orch.vault_pki_orch
-    - pillar:
-        # necessary to encode data as json to avoid escaping
-        event_data: {{ event_data | json() }}
-        event_target: {{ data['id'] }}
+revoke_old_cert:
+  salt.runner:
+    - name: vault_add_cert_crl.main
+    - kwargs:
+      host: {{ target }}
+      serialNum: {{ payload['serialNum'] }}
+      mount: {{ payload['mount'] }}
+
 

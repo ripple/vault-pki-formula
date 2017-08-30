@@ -6,7 +6,7 @@ revoke_old_cert:
     - pillar:
         # necessary to encode data as json to avoid escaping
         event_data: {{ event_data | json() }}
-    - serialNum: event_data['serialNum']
+    - serialNum: event_data
     - mount: event_data['data]['mount']
 
 

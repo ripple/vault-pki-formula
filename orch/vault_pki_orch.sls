@@ -1,8 +1,6 @@
 {% set payload = salt.pillar.get('event_data') %}
 {% set target = salt.pillar.get('event_target') %}
 
-print("priyanka:from orch file...")
-
 push_signed_cert:
   salt.runner:
     - name: vault_pki.main
@@ -17,10 +15,8 @@ revoke_old_cert:
     - name: vault_add_cert_crl.main
     - kwargs:
       host: {{ target }}
-      serialNum: |
-        {{ payload['serialNum'] }}
-      mount: |
-        {{ payload['mount'] }}
+      serialNum: {{ payload['serialNum'] }}
+      mount: {{ payload['mount'] }}
 
 activate_new_version:
   salt.state:

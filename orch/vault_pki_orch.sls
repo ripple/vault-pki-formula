@@ -1,6 +1,8 @@
 {% set payload = salt.pillar.get('event_data') %}
 {% set target = salt.pillar.get('event_target') %}
 
+print("priyanka:from orch file...")
+
 push_signed_cert:
   salt.runner:
     - name: vault_pki.main

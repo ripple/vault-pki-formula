@@ -346,7 +346,7 @@ def new_cert_needed(cert_path, refresh_at=0.5):
                 default_backend())
         validity_period = cert.not_valid_after - cert.not_valid_before
         refresh_offset = datetime.timedelta(
-            seconds=validity_period.seconds * refresh_at
+            seconds=validity_period.total_seconds() * refresh_at
         )
         refresh_after_date = cert.not_valid_before + refresh_offset
         if now > refresh_after_date:

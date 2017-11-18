@@ -3,7 +3,13 @@
 import logging
 import os
 import platform
+import stat
 import unittest
+
+try:
+    from unittest import mock
+except ImportError:
+    import mock
 
 from mock_salt import fake_salt
 from pyfakefs import fake_filesystem_unittest
@@ -13,6 +19,15 @@ import vault_pki
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.StreamHandler())
+
+FAKE_SCRIPT_FILE = 'test_post_activate.sh'
+FAKE_SCRIPT_MODE = 0o755
+FAKE_SCRIPT_BODY = '''#!/bin/bash
+echo hello world
+'''
+FAKE_SCRIPT_OUTPUT = 'hello world\n'
+FAKE_NONSCRIPT_FILE = 'not_executable.sh'
+FAKE_NONSCRIPT_MODE = 0o644
 
 
 class TestActivate(fake_filesystem_unittest.TestCase):
@@ -37,6 +52,9 @@ class TestActivate(fake_filesystem_unittest.TestCase):
         self.archive_dir = vault_pki.ARCHIVE_DIR.format(**format_settings)
         self.key_dir = vault_pki.KEY_DIR.format(**format_settings)
         self.live_dir = vault_pki.LIVE_DIR.format(**format_settings)
+        self.post_activate_dir = vault_pki.POST_ACTIVATE_DIR.format(
+            **format_settings
+        )
 
         # known non-existent version
         self.known_missing_version = '0005'
@@ -66,6 +84,21 @@ class TestActivate(fake_filesystem_unittest.TestCase):
                 os.path.join(new_archive_dir, vault_pki.FULLCHAIN_FILENAME)
             )
         logger.info('Versions available: %s', self.versions)
+
+        # create dummy post-activate script
+        script_mode = stat.S_IFREG | FAKE_SCRIPT_MODE
+        self.fs.CreateFile(
+            os.path.join(self.post_activate_dir, FAKE_SCRIPT_FILE),
+            st_mode=script_mode,
+            contents=FAKE_SCRIPT_BODY
+        )
+        # create non-executable file, which should be ignored
+        nonscript_mode = stat.S_IFREG | FAKE_NONSCRIPT_MODE
+        self.fs.CreateFile(
+            os.path.join(self.post_activate_dir, FAKE_NONSCRIPT_FILE),
+            st_mode=nonscript_mode
+        )
+
 
     def tearDown(self):
         pass
@@ -117,6 +150,19 @@ class TestActivate(fake_filesystem_unittest.TestCase):
         )
         found_version = vault_pki._get_current_version(self.live_dir)
         self.assertEqual(found_version, set_version)
+
+    @mock.patch('vault_pki.subprocess')
+    def testPostActivateScriptRun(self, subprocess_mock):
+        p_mock = mock.Mock()
+        subprocess_mock.Popen.return_value = p_mock
+        p_mock.communicate.return_value = (FAKE_SCRIPT_OUTPUT, '')
+
+        cmd = os.path.join(self.post_activate_dir, FAKE_SCRIPT_FILE)
+        activate_scripts = vault_pki.get_post_activate_scripts()
+        self.assertListEqual([cmd], activate_scripts)
+
+        _, stdout, _ = vault_pki.run_post_activate_script(cmd)
+        self.assertEqual(FAKE_SCRIPT_OUTPUT, stdout)
 
 
 if __name__ == '__main__':

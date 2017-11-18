@@ -105,6 +105,7 @@ import os
 import platform
 import re
 import stat
+import subprocess
 import sys
 
 from cryptography import x509
@@ -131,6 +132,8 @@ ARCHIVE_DIR = '{base}/archive/{fqdn}'
 KEY_BASE_DIR = '{base}/keys'
 KEY_DIR = '{base}/keys/{fqdn}'
 
+POST_ACTIVATE_DIR = '{base}/post-activate.d'
+
 VERSION_DIR_FORMAT = '{:04d}'
 VERSION_DIR_REGEX = '^[0-9]{4}$'
 
@@ -142,6 +145,7 @@ DIR_TREE = [
     ARCHIVE_DIR,
     KEY_BASE_DIR,
     KEY_DIR,
+    POST_ACTIVATE_DIR,
 ]
 
 DIR_MODE = 0o750
@@ -536,6 +540,54 @@ def _get_version_assets(version_str, fqdn=None, base_dir=BASE_DIR):
     return (cert_path, chain_path, key_path, pkcs8_key_path)
 
 
+def get_post_activate_scripts(base_dir=BASE_DIR):
+    """Get a list of the full paths of post activate scripts.
+    """
+    format_settings = {'base': base_dir}
+    post_activate_dir = POST_ACTIVATE_DIR.format(**format_settings)
+    path, _, activate_files = os.walk(post_activate_dir).next()
+    activate_scripts = []
+    for script in activate_files:
+        script_path = os.path.join(path, script)
+        if os.stat(script_path).st_mode & os.X_OK:
+            activate_scripts.append(script_path)
+    return activate_scripts
+
+
+def run_post_activate_script(cmd):
+    """Run a post-activate script returning output + return code.
+    """
+    popen = subprocess.Popen(
+        [cmd],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE
+    )
+    stdout, stderr = popen.communicate()
+    return_code = popen.returncode
+    return (return_code, stdout, stderr)
+
+
+def run_post_activate_scripts(base_dir=BASE_DIR):
+    activate_scripts = get_post_activate_scripts(base_dir=base_dir)
+    if not activate_scripts:
+        logger.info('No post-activate scripts found.')
+        return
+    for script in activate_scripts:
+        logger.info('Running script %s', script)
+        out, err, returncode = run_post_activate_script(script)
+        if returncode != 0:
+            logger.warn(
+                'Error running post-activate script %s (%d)',
+                script,
+                returncode)
+            logger.info('StdOut: %s', out)
+            logger.info('StdErr: %s', err)
+        else:
+            logger.info('Successfully ran %s', script)
+            logger.debug('StdOut: %s', out)
+            logger.debug('StdErr: %s', err)
+
+
 def activate_main(args):
     """Switch the live symlinks for cert/key/chain to the given version.
 
@@ -558,6 +610,7 @@ def activate_main(args):
         sys.exit(1)
     set_version = _activate_version_with_rollback(version_str, live_dir)
     logger.info('Set version "{}" to active.'.format(set_version))
+    run_post_activate_scripts()
 
 
 def checkgen_main(args):

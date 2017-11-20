@@ -644,7 +644,10 @@ def checkgen_main(args):
     live_dir = LIVE_DIR.format(**format_settings)
     cert_path = os.path.join(live_dir, CERT_FILENAME)
 
-    if new_cert_needed(cert_path):
+    if args.force:
+        logger.info('Run with *force* new cert generation.')
+
+    if new_cert_needed(cert_path) or args.force:
         version_base_dirs = [archive_dir, key_dir]
         new_version = create_new_version_dir(version_base_dirs,
                                              DIR_MODE,
@@ -702,6 +705,8 @@ def main():
     sub_parsers = parser.add_subparsers(help='sub-command help')
 
     parser_checkgen = sub_parsers.add_parser('checkgen', help='checkgen help')
+    parser_checkgen.add_argument('--force', action='store_true',
+                                 help='Force new cert generation.')
     parser_checkgen.set_defaults(main_func=checkgen_main)
 
     parser_list = sub_parsers.add_parser('list', help='list help')

@@ -549,7 +549,7 @@ def get_post_activate_scripts(base_dir=BASE_DIR):
     activate_scripts = []
     for script in activate_files:
         script_path = os.path.join(path, script)
-        if os.stat(script_path).st_mode & os.X_OK:
+        if os.access(script_path, os.X_OK):
             activate_scripts.append(script_path)
     return activate_scripts
 
@@ -577,7 +577,7 @@ def run_post_activate_scripts(base_dir=BASE_DIR):
         out, err, returncode = run_post_activate_script(script)
         if returncode != 0:
             logger.warn(
-                'Error running post-activate script %s (%d)',
+                'Error running post-activate script %s (%s)',
                 script,
                 returncode)
             logger.info('StdOut: %s', out)

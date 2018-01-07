@@ -17,11 +17,11 @@ functionality of Vault PKI.
 
 Events from the minion perspective, *during first application*, in order:
 1. ```cert``` state installs client at ```/usr/local/bin/vault_pki```
-2. ```cert``` state runs ```vault checkgen```  which creates the
+2. ```cert``` state runs ```vault_pki checkgen```  which creates the
    ```/etc/vault_pki``` directory structure, generates a CSR and fires a
    Salt event with the CSR and other data to request a signed certificate.
 3. Server side magic modifies the CSR and gets it signed, see
-   [Vault PKI Runner](https://github.com/ripple/salt-runner-vault-pki)
+   [Vault PKI Runner](https://github.com/ripple/salt-runner-vault-pki/blob/master/README.md)
    docs for details.
 4. More server side magic writes the signed certificate to the minion and
    runs the ```react_activate_cert``` state on minion.  The state in turn 
@@ -41,15 +41,21 @@ They will receive certificates according to the defaults and overrides
 configured on the Salt master (see Vault PKI Runner docs for details).
 
 **TLDR;**
-- Minions receive a certificate for their minion id, which should be the
-  hostname but make sure your Salt minion deployment agrees. 
+- ```vault_pki checkgen``` is safe to run.  Once up to date certificates
+  are in place it simply verifies the certificate age and exits. If the
+  certificates are too old, or missing, it requests new ones.
+- Minions receive a certificate for their Salt minion id, which should be
+  the hostname but make sure your Salt minion deployment agrees. 
 - Any SANs or IPSANs you wish to apply must be specified in the Vault
-  PKI overrides file on the Salt master (can be on a hostname or on a
-  minion pattern basis).
+  PKI overrides file on the Salt master (on a hostname or a minion
+  pattern basis).
 - Validity periods are also determined from a default setting on the Salt
   master, or are overridden in aforementioned overrides file.
-- Certificates are delivered asyncronously and may take 10-15 seconds to
-  arrive (```vault_pki```, currently, does not block and wait for them).
+- Post-Activation scripts can be setup to kick any server that needs to
+  know about a new certificate being delivered.
+- Certificates are delivered asyncronously and may take up to 10-15 seconds
+  to arrive (```vault_pki checkgen```, currently, does not block and wait
+  for them and instead logs the certificate request was sent and exits).
 
 **Always configure servers to use the keys and certificates in the
 ```/etc/vault_pki/live/$hostname``` directory.**
@@ -70,7 +76,7 @@ requisite properly. *(e.g. to make the ```nginx``` state require the
 ```cert``` be applied first -- without which can lead to nginx
 starting up and crashing because certificates haven't been delivered yet)*
 This is only an issue during the first application of highstate, and
-is being worked on.
+a fix is being worked on.
 
 
 ### Certificate Updates
@@ -113,6 +119,6 @@ Example: 0001, 0002, 0003, ...
 
 ### Notes
 
-1.If you must copy the key + certificate material out of the Vault PKI
-  client directory -- do it in a post-activate script if possible so
-  that your server still gets the newest version regularly.
+1. If you must copy the key + certificate material out of the Vault PKI
+   client directory -- do it in a post-activate script if possible so
+   that your server still gets the newest version regularly.

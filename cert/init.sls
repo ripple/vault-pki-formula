@@ -16,6 +16,8 @@
 #
 # vim: set ft=sls :
 
+{% set os_family = grains['os_family'] -%}
+
 include:
   - python.pip
 
@@ -26,11 +28,11 @@ setup new cert-access group:
 install crypto dependencies:
   pkg.installed:
     - pkgs:
-{% if grains['os_family'] == 'Debian' %}
+{% if os_family == 'Debian' %}
       - python-dev
       - libssl-dev
       - libffi-dev
-{% elif grains['os_family'] == 'RedHat' %}
+{% elif os_family == 'RedHat' %}
       - python-devel
       - libffi-devel
       - openssl-libs
@@ -39,9 +41,9 @@ install crypto dependencies:
 install python cryptography module:
   pip.installed:
     - name: cryptography
-{% if grains['os_family'] == 'Debian' %}
+{% if os_family == 'Debian' %}
     - bin_env: /usr/local/bin/pip2
-{% elif grains['os_family'] == 'RedHat' %}
+{% elif os_family == 'RedHat' %}
     - bin_env: /usr/bin/pip2
 {% endif %}
     - reload_modules: true
@@ -69,6 +71,7 @@ checkgen_cert:
     - name: /usr/local/bin/vault_pki checkgen
     - identifier: checkgen_cert
     - user: root
-    - special: '@daily'
+    - hour: random
+    - minute: random
     - require:
       - file: /usr/local/bin/vault_pki

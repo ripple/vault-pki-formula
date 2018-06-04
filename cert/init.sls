@@ -68,7 +68,7 @@ run vault_pki to get initial cert:
 
 checkgen_cert:
   cron.present:
-    - name: /usr/local/bin/vault_pki checkgen
+    - name: (/usr/local/bin/vault_pki list ; /usr/local/bin/vault_pki checkgen ; /usr/local/bin/vault_pki list) 2>&1 | logger -t vault_pki
     - identifier: checkgen_cert
     - user: root
     - hour: random

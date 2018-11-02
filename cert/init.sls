@@ -48,7 +48,7 @@ install python cryptography module:
 {% endif %}
     - reload_modules: true
     - require:
-      - cmd: install_pip2
+      - pkg: python2-pip
 
 /usr/local/bin/vault_pki:
   file.managed:

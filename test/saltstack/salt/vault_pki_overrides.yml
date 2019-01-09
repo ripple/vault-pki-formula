@@ -1,0 +1,11 @@
+'E@www[0-9].example.com':
+  alt_names:
+    - www.example.com
+    - example.com
+    - blog.example.com
+
+'my-vault.example.com':
+  ttl: 8760h
+
+'something.example.com':
+  ipsans: True

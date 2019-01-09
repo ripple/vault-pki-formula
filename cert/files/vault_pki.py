@@ -71,6 +71,8 @@ checkgen
           the former into the new keys version directory.
         - Send the CSR in a Salt event call to the Salt master onward
           to be signed (with a return path to write the certificate at).
+        - Wait for signed CA from the Salt Master
+        - Write certificate to disk and activate new version
     - Otherwise if certificate is in OK, log that and exit.
 
 activate
@@ -121,6 +123,7 @@ import re
 import stat
 import subprocess
 import sys
+import threading
 
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
@@ -131,6 +134,8 @@ from cryptography.hazmat.primitives import serialization
 import six
 
 from salt import client as salt_client
+from salt import config as salt_config
+from salt.utils import event as salt_event
 
 OWNER_UID = 0
 ACCESS_GROUP = 'cert-access'
@@ -179,6 +184,13 @@ KEY_FILENAME_TO_FORMAT = {
 }
 
 SALT_EVENT_TAG = 'request/sign'
+SALT_EVENT_RESPONSE_TAG = 'request/certificate'
+SALT_EVENT_WAIT_TIME = 120
+SALT_MINION_CONFIG = '/etc/salt/minion'
+SALT_SOCKET_DIR = '/var/run/salt'
+SALT_EVENT_TRANSPORT = 'zeromq'
+
+NODE_FQDN = os.getenv('SALT_MINION_NAME', platform.node())
 
 logger = logging.getLogger(__file__)
 
@@ -196,6 +208,37 @@ class SetupError(Exception):
 class GenerationError(Exception):
     """Exception class for errors during key/CSR generation."""
     pass
+
+
+class FakeVersionArgParser(object):
+    """Craft an object appropriate to be used with 'activate_main' internally"""
+    def __init__(self, version):
+        self.version = [version]
+
+
+def quit_function(fn_name):
+    # print to stderr, unbuffered in Python 2.
+    print('{0} took too long'.format(fn_name), file=sys.stderr)
+    sys.stderr.flush() # Python 3 stderr is likely buffered.
+    thread.interrupt_main() # raises KeyboardInterrupt
+
+
+def exit_after(s):
+    '''
+    use as decorator to exit process if
+    function takes longer than s seconds
+    '''
+    def outer(fn):
+        def inner(*args, **kwargs):
+            timer = threading.Timer(s, quit_function, args=[fn.__name__])
+            timer.start()
+            try:
+                result = fn(*args, **kwargs)
+            finally:
+                timer.cancel()
+            return result
+        return inner
+    return outer
 
 
 def _setup_directory(dir_path, mode, owner_uid, group_gid):
@@ -386,6 +429,83 @@ def send_cert_request(event_tag, new_version, dest_cert_path, csr):
                       path=dest_cert_path)
 
 
+def _wait_for_signed_cert_request(func):
+    """Capture signed certificate from event bus"""
+    return func()
+
+
+@exit_after(SALT_EVENT_WAIT_TIME)
+def _minion_event(opts={}):
+    """Class to wait for cert via get_event"""
+    opts['id'] = NODE_FQDN
+    opts['node'] = 'minion'
+    opts['transport'] = SALT_EVENT_TRANSPORT
+    opts['sock_dir'] = os.path.join(SALT_SOCKET_DIR, opts['node'])
+    event = salt_event.get_event(
+        opts['node'],
+        sock_dir=opts['sock_dir'],
+        transport=opts['transport'],
+        opts=opts,
+        listen=True)
+
+    while True:
+        ret = event.get_event(full=True)
+        if ret is None:
+            logger.debug('[_minion_event] No event data in packet')
+            continue
+        data = ret.get('data', False)
+        if data and ret['tag'] == SALT_EVENT_RESPONSE_TAG:
+            if _job_contains_cert_data(data):
+                logger.debug('[_minion_event] Job contains cert data!')
+                return data['data']
+            else:
+                logger.debug('[_minion_event] Job does not contains cert data. :(')
+                continue
+
+
+def _job_contains_cert_data(data):
+    """Boolean checks to ensure any received job message contains return cert data"""
+    if data is None:
+        return False
+
+    if 'cert' in data['data']:
+        return True
+    else:
+        return False
+
+
+def _get_certificate_id(cert_data):
+    """Extract the latest ID from certificate response"""
+    cert_path = cert_data["cert_path"]
+    index = cert_path.split("/")[5]
+    if index.isdigit():
+        return index
+    else:
+        return False
+
+
+def _write_certificate_data(cert, cert_path, ca, ca_path):
+    """Write out certificate data to filesystem"""
+
+    cert_write = _write_file(cert, cert_path)
+    ca_write = _write_file(ca, ca_path)
+
+    if cert_write and ca_write:
+        return True
+    else:
+        return False
+
+
+def _write_file(contents, path):
+    """Try to write file to filesystem"""
+    try:
+        with open(path, 'w') as f:
+            f.write(contents)
+        return True
+    except IOError:
+        return False
+
+
 def _atomic_link_switch(source, destination):
     """Does an atomic symlink swap by overwriting the destination symlink.
 
@@ -417,6 +537,7 @@ def _activate_version(version_str, live_dir):
     live_pkcs8_key_path = os.path.join(live_dir, PKCS8_KEY_FILENAME)
     live_cert_path = os.path.join(live_dir, CERT_FILENAME)
     live_chain_path = os.path.join(live_dir, FULLCHAIN_FILENAME)
+    current_path = os.path.join(live_dir, 'current')
     (cert_path,
      chain_path,
      key_path,
@@ -426,6 +547,9 @@ def _activate_version(version_str, live_dir):
         _atomic_link_switch(pkcs8_key_path, live_pkcs8_key_path)
         _atomic_link_switch(cert_path, live_cert_path)
         _atomic_link_switch(chain_path, live_chain_path)
+
+        # Ensure last to assert all atomic link switching has happened
+        _write_file(version_str, current_path)
     except ActivationError:
         logger.critical(
             'Failed to activate "{}"!'.format(
@@ -437,6 +561,7 @@ def _activate_version(version_str, live_dir):
 
 def _activate_version_with_rollback(version_str, live_dir):
     """Activate a cert/key version but rollback to if errors occur.
+
 
     Records the current cert/key version before activation and if it
     is sane attempts to restore it in the event of an error occuring.
@@ -680,8 +805,57 @@ def checkgen_main(args):
                                     csr)
         if not sent_ok:
             logger.error('Error sending CSR to salt master!')
+            sys.exit(1)
+
+        certificate_data = _wait_for_signed_cert_request(_minion_event)
+        if not certificate_data:
+            logger.error('Did not receive certificate from salt master')
+            sys.exit(1)
+
+        certificate_id = _get_certificate_id(certificate_data)
+        if not certificate_id:
+            logger.error('Error retrieving certificate ID')
+            sys.exit(1)
+
+        cert = certificate_data['cert']
+        cert_path = certificate_data['cert_path']
+        ca = certificate_data['fullchain']
+        ca_path = certificate_data['fullchain_path']
+
+        write_certificates = _write_certificate_data(cert, cert_path, ca, ca_path)
+        if write_certificates:
+            args = FakeVersionArgParser(certificate_id)
+            activate_main(args)
+        else:
+            logger.error('Error writing certificates to disk')
+            sys.exit(1)
     else:
         logger.info('Cert Status: OK.')
+
+
+def checkvalid_main(args):
+    """Function to quickly check if a certificate update is needed
+
+    Only runs a small part of the checkgen_main script in order to test
+    for certificate validity. This is used to ensure state in configuration
+    management tooling.
+    """
+    fqdn = NODE_FQDN
+    if not fqdn:
+        raise SetupError('Missing FQDN!')
+    try:
+        group_info = grp.getgrnam(ACCESS_GROUP)
+        group_gid = group_info.gr_gid
+    except KeyError:
+        raise SetupError('Missing group: {}'.format(ACCESS_GROUP))
+
+    format_settings = {'base': BASE_DIR, 'fqdn': fqdn}
+    live_dir = LIVE_DIR.format(**format_settings)
+    cert_path = os.path.join(live_dir, CERT_FILENAME)
+    if new_cert_needed(cert_path):
+        sys.exit(1)
+    else:
+        sys.exit(0)
 
 
 def list_main(args):
@@ -722,6 +896,9 @@ def main():
     parser_checkgen.add_argument('--force', action='store_true',
                                  help='Force new cert generation.')
     parser_checkgen.set_defaults(main_func=checkgen_main)
+
+    parser_checkgen = sub_parsers.add_parser('checkvalid', help='checkvalid help')
+    parser_checkgen.set_defaults(main_func=checkvalid_main)
 
     parser_list = sub_parsers.add_parser('list', help='list help')
     parser_list.set_defaults(main_func=list_main)

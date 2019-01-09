@@ -57,14 +57,16 @@ install python cryptography module:
     - group: root
     - mode: 0755
 
-run vault_pki to get initial cert:
+run vault_pki:
   cmd.run:
     - name: /usr/local/bin/vault_pki checkgen
+    - unless: /usr/local/bin/vault_pki checkvalid
     - require:
       - group: setup new cert-access group
       - pkg: install crypto dependencies
       - pip: install python cryptography module
       - file: /usr/local/bin/vault_pki
+
 
 checkgen_cert:
   cron.present:

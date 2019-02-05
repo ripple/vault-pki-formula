@@ -429,13 +429,8 @@ def send_cert_request(event_tag, new_version, dest_cert_path, csr):
                       path=dest_cert_path)
 
 
-def _wait_for_signed_cert_request(func):
-    """Capture signed certificate from event bus"""
-    return func()
-
-
 @exit_after(SALT_EVENT_WAIT_TIME)
-def _minion_event(opts={}):
+def _wait_for_signed_cert_request(opts={}):
     """Class to wait for cert via get_event"""
     opts['id'] = NODE_FQDN
     opts['node'] = 'minion'
@@ -804,7 +799,7 @@ def checkgen_main(args):
             logger.error('Error sending CSR to salt master!')
             sys.exit(1)
 
-        certificate_data = _wait_for_signed_cert_request(_minion_event)
+        certificate_data = _wait_for_signed_cert_request()
         if not certificate_data:
             logger.error('Did not receive certificate from salt master')
             sys.exit(1)

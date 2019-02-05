@@ -224,10 +224,10 @@ def quit_function(fn_name):
 
 
 def exit_after(s):
-    '''
+    """
     use as decorator to exit process if
     function takes longer than s seconds
-    '''
+    """
     def outer(fn):
         def inner(*args, **kwargs):
             timer = threading.Timer(s, quit_function, args=[fn.__name__])

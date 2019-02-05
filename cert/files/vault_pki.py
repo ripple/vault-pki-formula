@@ -548,9 +548,6 @@ def _activate_version(version_str, live_dir):
         _atomic_link_switch(pkcs8_key_path, live_pkcs8_key_path)
         _atomic_link_switch(cert_path, live_cert_path)
         _atomic_link_switch(chain_path, live_chain_path)
-
-        # Ensure last to assert all atomic link switching has happened
-        _write_file(version_str, current_path)
     except ActivationError:
         logger.critical(
             'Failed to activate "{}"!'.format(

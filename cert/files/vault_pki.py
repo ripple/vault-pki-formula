@@ -191,7 +191,6 @@ SALT_MINION_CONFIG = '/etc/salt/minion'
 SALT_SOCKET_DIR = '/var/run/salt'
 SALT_EVENT_TRANSPORT = 'zeromq'
 
-NODE_FQDN = os.getenv('SALT_MINION_NAME', platform.node())
 
 logger = logging.getLogger(__file__)
 
@@ -838,7 +837,7 @@ def checkvalid_main(args):
     for certificate validity. This is used to ensure state in configuration
     management tooling.
     """
-    fqdn = NODE_FQDN
+    fqdn = platform.node()
     if not fqdn:
         raise SetupError('Missing FQDN!')
     try:

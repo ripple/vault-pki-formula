@@ -460,11 +460,11 @@ def _wait_for_signed_cert_request(opts={}):
 
 def _job_contains_cert_data(data):
     """Boolean checks to ensure any received job message contains return cert data"""
-    if data is None:
-        return False
-
-    if 'cert' in data['data']:
-        return True
+    if isinstance(data, dict):
+        if 'cert' in data['data']:
+            return True
+        else:
+            return False
     else:
         return False
 

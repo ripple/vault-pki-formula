@@ -671,6 +671,56 @@ def _get_version_assets(version_str, fqdn=None, base_dir=BASE_DIR):
     return (cert_path, chain_path, key_path, pkcs8_key_path)
 
 
+def _request_new_certificate():
+    """
+    Request a new certificate via Salt Event Bus, and wait for response
+    """
+    archive_dir = ARCHIVE_DIR.format(**format_settings)
+    key_dir = KEY_DIR.format(**format_settings)
+    live_dir = LIVE_DIR.format(**format_settings)
+    cert_path = os.path.join(live_dir, CERT_FILENAME)
+    version_base_dirs = [archive_dir, key_dir]
+    new_version = create_new_version_dir(version_base_dirs,
+                                            DIR_MODE,
+                                            OWNER_UID,
+                                            group_gid)
+    new_key_dir = os.path.join(key_dir, new_version)
+    csr = generate(fqdn,
+                    new_key_dir,
+                    DEFAULT_KEY_LENGTH,
+                    KEY_MODE, OWNER_UID,
+                    group_gid)
+    new_archive_dir = os.path.join(archive_dir, new_version)
+    sent_ok = send_cert_request(SALT_EVENT_TAG,
+                                new_version,
+                                new_archive_dir,
+                                csr)
+    if not sent_ok:
+        return False
+
+    certificate_data = _wait_for_signed_cert_request()
+    if not certificate_data:
+        logger.error('Did not receive certificate from salt master')
+        return False
+
+    certificate_id = _get_certificate_id(certificate_data)
+    if not certificate_id:
+        logger.error('Error retrieving certificate ID')
+        return False
+
+    cert = certificate_data['cert']
+    cert_path = certificate_data['cert_path']
+    ca = certificate_data['fullchain']
+    ca_path = certificate_data['fullchain_path']
+
+    write_certificates = _write_certificate_data(cert, cert_path, ca, ca_path)
+    if write_certificates:
+        return certificate_id
+    else:
+        logger.error('Error writing certificates to disk')
+        return False
+
+
 def get_post_activate_scripts(base_dir=BASE_DIR):
     """Get a list of the full paths of post activate scripts.
     """
@@ -770,59 +820,21 @@ def checkgen_main(args):
     except SetupError:
         raise
     format_settings = {'base': BASE_DIR, 'fqdn': fqdn}
-    archive_dir = ARCHIVE_DIR.format(**format_settings)
-    key_dir = KEY_DIR.format(**format_settings)
-    live_dir = LIVE_DIR.format(**format_settings)
-    cert_path = os.path.join(live_dir, CERT_FILENAME)
 
     if args.force:
         logger.info('Run with *force* new cert generation.')
 
     if new_cert_needed(cert_path) or args.force:
-        version_base_dirs = [archive_dir, key_dir]
-        new_version = create_new_version_dir(version_base_dirs,
-                                             DIR_MODE,
-                                             OWNER_UID,
-                                             group_gid)
-        new_key_dir = os.path.join(key_dir, new_version)
-        csr = generate(fqdn,
-                       new_key_dir,
-                       DEFAULT_KEY_LENGTH,
-                       KEY_MODE, OWNER_UID,
-                       group_gid)
-        new_archive_dir = os.path.join(archive_dir, new_version)
-        sent_ok = send_cert_request(SALT_EVENT_TAG,
-                                    new_version,
-                                    new_archive_dir,
-                                    csr)
-        if not sent_ok:
-            logger.error('Error sending CSR to salt master!')
-            sys.exit(1)
-
-        certificate_data = _wait_for_signed_cert_request()
-        if not certificate_data:
-            logger.error('Did not receive certificate from salt master')
-            sys.exit(1)
-
-        certificate_id = _get_certificate_id(certificate_data)
-        if not certificate_id:
-            logger.error('Error retrieving certificate ID')
-            sys.exit(1)
-
-        cert = certificate_data['cert']
-        cert_path = certificate_data['cert_path']
-        ca = certificate_data['fullchain']
-        ca_path = certificate_data['fullchain_path']
-
-        write_certificates = _write_certificate_data(cert, cert_path, ca, ca_path)
-        if write_certificates:
+        certificate_id = _request_new_certificate()
+        if job_status:
             args = FakeVersionArgParser(certificate_id)
             activate_main(args)
         else:
-            logger.error('Error writing certificates to disk')
+            logger.error('Unable to update certificate.')
             sys.exit(1)
     else:
         logger.info('Cert Status: OK.')
+        sys.exit(0)
 
 
 def checkvalid_main(args):

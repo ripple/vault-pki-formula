@@ -191,6 +191,9 @@ SALT_MINION_CONFIG = '/etc/salt/minion'
 SALT_SOCKET_DIR = '/var/run/salt'
 SALT_EVENT_TRANSPORT = 'zeromq'
 
+# The depth of directory transversal in / to get to /etc/vault_pki/archive/my_hostname/
+CERTIFICATE_ID_DIRECTORY_DEPTH = 5
+
 
 logger = logging.getLogger(__file__)
 
@@ -472,7 +475,7 @@ def _job_contains_cert_data(data):
 def _get_certificate_id(cert_data):
     """Extract the latest ID from certificate response"""
     cert_path = cert_data["cert_path"]
-    index = cert_path.split("/")[5]
+    index = cert_path.split("/")[CERTIFICATE_ID_DIRECTORY_DEPTH]
     if index.isdigit():
         return index
     else:

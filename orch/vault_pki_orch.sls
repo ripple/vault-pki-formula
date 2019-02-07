@@ -15,6 +15,7 @@ activate_new_version:
     - tgt: {{ target }}
     - sls:
       - cert.react_activate_cert
+    - test: False
     - pillar:
         # beware version being converted to a number
         version: "{{ payload['version'] }}"

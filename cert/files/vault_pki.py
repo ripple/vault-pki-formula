@@ -694,11 +694,14 @@ def list_main(args):
     live_dir = LIVE_DIR.format(**format_settings)
 
     current_version = _get_current_version(live_dir)
-    for version in sorted(get_version_dirs([archive_dir, key_dir])):
-        if version == current_version:
-            print('{} *'.format(version))
-        else:
-            print(version)
+    if args.active:
+        print(current_version)
+    else:
+        for version in sorted(get_version_dirs([archive_dir, key_dir])):
+            if version == current_version:
+                print('{} *'.format(version))
+            else:
+                print(version)
 
 
 def setup_logger(logger, interactive=False, default_level=logging.INFO):
@@ -724,6 +727,8 @@ def main():
     parser_checkgen.set_defaults(main_func=checkgen_main)
 
     parser_list = sub_parsers.add_parser('list', help='list help')
+    parser_list.add_argument('--active', action='store_true',
+                                 help='List only the active cert version.')
     parser_list.set_defaults(main_func=list_main)
 
     parser_activate = sub_parsers.add_parser('activate', help='activate help')

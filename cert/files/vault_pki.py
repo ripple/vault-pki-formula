@@ -435,7 +435,8 @@ def send_cert_request(event_tag, new_version, dest_cert_path, csr):
 @exit_after(SALT_EVENT_WAIT_TIME)
 def _wait_for_signed_cert_request(opts={}):
     """Class to wait for cert via get_event"""
-    opts['id'] = NODE_FQDN
+    fqdn = platform.node()
+    opts['id'] = fqdn
     opts['node'] = 'minion'
     opts['transport'] = SALT_EVENT_TRANSPORT
     opts['sock_dir'] = os.path.join(SALT_SOCKET_DIR, opts['node'])
@@ -674,10 +675,11 @@ def _get_version_assets(version_str, fqdn=None, base_dir=BASE_DIR):
     return (cert_path, chain_path, key_path, pkcs8_key_path)
 
 
-def _request_new_certificate():
+def _request_new_certificate(fqdn, group_gid):
     """
     Request a new certificate via Salt Event Bus, and wait for response
     """
+    format_settings = {'base': BASE_DIR, 'fqdn': fqdn}
     archive_dir = ARCHIVE_DIR.format(**format_settings)
     key_dir = KEY_DIR.format(**format_settings)
     live_dir = LIVE_DIR.format(**format_settings)
@@ -823,13 +825,15 @@ def checkgen_main(args):
     except SetupError:
         raise
     format_settings = {'base': BASE_DIR, 'fqdn': fqdn}
+    live_dir = LIVE_DIR.format(**format_settings)
+    cert_path = os.path.join(live_dir, CERT_FILENAME)
 
     if args.force:
         logger.info('Run with *force* new cert generation.')
 
     if new_cert_needed(cert_path) or args.force:
-        certificate_id = _request_new_certificate()
-        if job_status:
+        certificate_id = _request_new_certificate(fqdn, group_gid)
+        if certificate_id:
             args = FakeVersionArgParser(certificate_id)
             activate_main(args)
         else:

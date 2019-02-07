@@ -346,6 +346,19 @@ def create_new_version_dir(version_base_dirs, mode, owner_uid, group_gid):
     return new_version_str
 
 
+def get_cert_validity_period(cert_path):
+    """For a certificate returns the start and end of its validity period.
+
+    Returns a tuple of datetime.datetime (start, end) to indicate the
+    validity period of the certificate.
+    """
+    with open(cert_path, 'r') as certfile:
+        cert = x509.load_pem_x509_certificate(
+            six.b(certfile.read()),
+            default_backend())
+    return (cert.not_valid_before, cert.not_valid_after)
+
+
 def new_cert_needed(cert_path, refresh_at=0.5):
     """True if a cert is past the percentile through it's validity period.
 
@@ -358,11 +371,8 @@ def new_cert_needed(cert_path, refresh_at=0.5):
         get_new_cert = True
         logger.info('Cert status: missing.')
     else:
-        with open(cert_path, 'r') as certfile:
-            cert = x509.load_pem_x509_certificate(
-                six.b(certfile.read()),
-                default_backend())
-        validity_period = cert.not_valid_after - cert.not_valid_before
+        not_valid_before, not_valid_after = get_cert_validity_period(cert_path)
+        validity_period = not_valid_after - not_valid_before
         refresh_offset = datetime.timedelta(
             seconds=validity_period.total_seconds() * refresh_at
         )
@@ -692,10 +702,14 @@ def list_main(args):
     archive_dir = ARCHIVE_DIR.format(**format_settings)
     key_dir = KEY_DIR.format(**format_settings)
     live_dir = LIVE_DIR.format(**format_settings)
+    cert_path = os.path.join(live_dir, CERT_FILENAME)
 
     current_version = _get_current_version(live_dir)
     if args.active:
         print(current_version)
+    elif args.expiration:
+        _, not_valid_after = get_cert_validity_period(cert_path)
+        print(not_valid_after.strftime('%s'))
     else:
         for version in sorted(get_version_dirs([archive_dir, key_dir])):
             if version == current_version:
@@ -728,7 +742,9 @@ def main():
 
     parser_list = sub_parsers.add_parser('list', help='list help')
     parser_list.add_argument('--active', action='store_true',
-                                 help='List only the active cert version.')
+                             help='List only the active cert version.')
+    parser_list.add_argument('--expiration', action='store_true',
+                             help='Show expiration of the active cert.')
     parser_list.set_defaults(main_func=list_main)
 
     parser_activate = sub_parsers.add_parser('activate', help='activate help')

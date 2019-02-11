@@ -123,8 +123,7 @@ import re
 import stat
 import subprocess
 import sys
-import thread
-import threading
+import time
 
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
@@ -409,7 +408,7 @@ def send_cert_request(event_tag, new_version, dest_cert_path, csr):
                       path=dest_cert_path)
 
 
-def _wait_for_signed_cert_request(opts={}, timeout=SALT_EVENT_WAIT_TIME):
+def _wait_for_signed_cert_request(timeout, opts={}):
     """Class to wait for cert via get_event"""
     fqdn = platform.node()
     opts['id'] = fqdn
@@ -644,7 +643,7 @@ def _get_version_assets(version_str, fqdn=None, base_dir=BASE_DIR):
     return (cert_path, chain_path, key_path, pkcs8_key_path)
 
 
-def _request_new_certificate(fqdn, group_gid, timeout=SALT_EVENT_WAIT_TIME):
+def _request_new_certificate(fqdn, group_gid, timeout):
     """
     Request a new certificate via Salt Event Bus, and wait for response
     """
@@ -878,7 +877,7 @@ def main():
     parser_checkgen.add_argument('--force', action='store_true',
                                  help='Force new cert generation.')
     parser_checkgen.add_argument('-t', '--timeout', type=int, default=SALT_EVENT_WAIT_TIME,
-                                 help="Total time to wait for Cert Request. Default: {}".format(SALT_EVENT_WAIT_TIME) )
+                                 help="Total time (in seconds) to wait for Cert Request. Default: {}".format(SALT_EVENT_WAIT_TIME) )
     parser_checkgen.set_defaults(main_func=checkgen_main)
 
     parser_checkgen = sub_parsers.add_parser('checkvalid', help='checkvalid help')

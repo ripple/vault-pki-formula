@@ -53,7 +53,7 @@ configured on the Salt master (see Vault PKI Runner docs for details).
   master, or are overridden in aforementioned overrides file.
 - Post-Activation scripts can be setup to kick any server that needs to
   know about a new certificate being delivered.
-- Certificates are delivered asyncronously and may take up to 10-15 seconds
+- Certificates are delivered asynchronously and may take up to 10-15 seconds
   to arrive (```vault_pki checkgen```, currently, does not block and wait
   for them and instead logs the certificate request was sent and exits).
 
@@ -71,7 +71,7 @@ delivery, create a script to notify your service as desired and place it
 in ```/etc/vault_pki/post-activate.d/``` with the executable bit set.
 
 **Important Caveat**: Because the ```cert``` state incorporates
-asyncronous behavior it is not currently possible to use it in a
+asynchronous behavior it is not currently possible to use it in a
 requisite properly. *(e.g. to make the ```nginx``` state require the
 ```cert``` be applied first -- without which can lead to nginx
 starting up and crashing because certificates haven't been delivered yet)*

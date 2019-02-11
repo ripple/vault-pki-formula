@@ -170,6 +170,8 @@ DIR_TREE = [
 
 DIR_MODE = 0o750
 KEY_MODE = 0o640
+CA_MODE = 0o644
+CERT_MODE = 0o644
 
 KEY_FILENAME = 'privkey.pem'
 PKCS8_KEY_FILENAME = 'privkey.pkcs8'
@@ -483,23 +485,15 @@ def _get_certificate_id(cert_data):
         return False
 
 
-def _write_certificate_data(cert, cert_path, ca, ca_path):
-    """Write out certificate data to filesystem"""
-
-    cert_write = _write_file(cert, cert_path)
-    ca_write = _write_file(ca, ca_path)
-
-    if cert_write and ca_write:
-        return True
-    else:
-        return False
-
-
-def _write_file(contents, path):
-    """Try to write file to filesystem"""
+def _write_file(contents, path, owner_uid, group_gid, mode):
+    """Try to write file to filesystem with specific UID, GID, and file mode"""
     try:
         with open(path, 'w') as f:
             f.write(contents)
+
+        os.chmod(path, mode)
+        os.chown(path, owner_uid, group_gid)
+
         return True
     except IOError:
         return False
@@ -718,8 +712,10 @@ def _request_new_certificate(fqdn, group_gid):
     ca = certificate_data['fullchain']
     ca_path = certificate_data['fullchain_path']
 
-    write_certificates = _write_certificate_data(cert, cert_path, ca, ca_path)
-    if write_certificates:
+    write_ca = _write_file(ca, ca_path, OWNER_UID, group_gid, CA_MODE)
+    write_cert = _write_file(cert, cert_path, OWNER_UID, group_gid, CERT_MODE)
+
+    if write_ca and write_cert:
         return certificate_id
     else:
         logger.error('Error writing certificates to disk')

@@ -221,31 +221,6 @@ class FakeVersionArgParser(object):
         self.version = [version]
 
 
-def quit_function(fn_name):
-    # print to stderr, unbuffered in Python 2.
-    print('{0} took too long'.format(fn_name), file=sys.stderr)
-    sys.stderr.flush() # Python 3 stderr is likely buffered.
-    thread.interrupt_main() # raises KeyboardInterrupt
-
-
-def exit_after(s):
-    """
-    use as decorator to exit process if
-    function takes longer than s seconds
-    """
-    def outer(fn):
-        def inner(*args, **kwargs):
-            timer = threading.Timer(s, quit_function, args=[fn.__name__])
-            timer.start()
-            try:
-                result = fn(*args, **kwargs)
-            finally:
-                timer.cancel()
-            return result
-        return inner
-    return outer
-
-
 def _setup_directory(dir_path, mode, owner_uid, group_gid):
     """Ensure a given directory exists and conforms to expected settings."""
     try:
@@ -434,14 +409,14 @@ def send_cert_request(event_tag, new_version, dest_cert_path, csr):
                       path=dest_cert_path)
 
 
-@exit_after(SALT_EVENT_WAIT_TIME)
-def _wait_for_signed_cert_request(opts={}):
+def _wait_for_signed_cert_request(opts={}, timeout=SALT_EVENT_WAIT_TIME):
     """Class to wait for cert via get_event"""
     fqdn = platform.node()
     opts['id'] = fqdn
     opts['node'] = 'minion'
     opts['transport'] = SALT_EVENT_TRANSPORT
     opts['sock_dir'] = os.path.join(SALT_SOCKET_DIR, opts['node'])
+    stop_time = time.time() + timeout
     event = salt_event.get_event(
         opts['node'],
         sock_dir=opts['sock_dir'],
@@ -449,7 +424,7 @@ def _wait_for_signed_cert_request(opts={}):
         opts=opts,
         listen=True)
 
-    while True:
+    while time.time() < stop_time:
         ret = event.get_event(full=True)
         if ret is None:
             logger.debug('[_minion_event] No event data in packet')
@@ -669,7 +644,7 @@ def _get_version_assets(version_str, fqdn=None, base_dir=BASE_DIR):
     return (cert_path, chain_path, key_path, pkcs8_key_path)
 
 
-def _request_new_certificate(fqdn, group_gid):
+def _request_new_certificate(fqdn, group_gid, timeout=SALT_EVENT_WAIT_TIME):
     """
     Request a new certificate via Salt Event Bus, and wait for response
     """
@@ -697,7 +672,7 @@ def _request_new_certificate(fqdn, group_gid):
     if not sent_ok:
         return False
 
-    certificate_data = _wait_for_signed_cert_request()
+    certificate_data = _wait_for_signed_cert_request(timeout)
     if not certificate_data:
         logger.error('Did not receive certificate from salt master')
         return False
@@ -828,7 +803,7 @@ def checkgen_main(args):
         logger.info('Run with *force* new cert generation.')
 
     if new_cert_needed(cert_path) or args.force:
-        certificate_id = _request_new_certificate(fqdn, group_gid)
+        certificate_id = _request_new_certificate(fqdn, group_gid, args.timeout)
         if certificate_id:
             args = FakeVersionArgParser(certificate_id)
             activate_main(args)
@@ -902,6 +877,8 @@ def main():
     parser_checkgen = sub_parsers.add_parser('checkgen', help='checkgen help')
     parser_checkgen.add_argument('--force', action='store_true',
                                  help='Force new cert generation.')
+    parser_checkgen.add_argument('-t', '--timeout', type=int, default=SALT_EVENT_WAIT_TIME,
+                                 help="Total time to wait for Cert Request. Default: {}".format(SALT_EVENT_WAIT_TIME) )
     parser_checkgen.set_defaults(main_func=checkgen_main)
 
     parser_checkgen = sub_parsers.add_parser('checkvalid', help='checkvalid help')

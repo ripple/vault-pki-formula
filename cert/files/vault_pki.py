@@ -893,8 +893,11 @@ def main():
     parser_checkgen = sub_parsers.add_parser('checkgen', help='checkgen help')
     parser_checkgen.add_argument('--force', action='store_true',
                                  help='Force new cert generation.')
-    parser_checkgen.add_argument('-t', '--timeout', type=int, default=SALT_EVENT_WAIT_TIME,
-                                 help="Total time (in seconds) to wait for Cert Request. Default: {}".format(SALT_EVENT_WAIT_TIME) )
+    parser_checkgen.add_argument('-t', '--timeout',
+                                 type=int,
+                                 default=SALT_EVENT_WAIT_TIME,
+                                 help="Time (sec) to wait for Cert. Default: {}"
+                                 .format(SALT_EVENT_WAIT_TIME))
     parser_checkgen.set_defaults(main_func=checkgen_main)
 
     parser_checkgen = sub_parsers.add_parser('checkvalid', help='checkvalid help')

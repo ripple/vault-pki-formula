@@ -17,6 +17,7 @@
 # vim: set ft=sls :
 
 {% set os_family = grains['os_family'] -%}
+{% set vault_pki_timeout = salt['pillar.get']('vault_pki:timeout', '600') %}
 
 include:
   - python.pip
@@ -59,7 +60,7 @@ install python cryptography module:
 
 run vault_pki:
   cmd.run:
-    - name: /usr/local/bin/vault_pki checkgen
+    - name: /usr/local/bin/vault_pki checkgen --timeout {{ vault_pki_timeout }}
     - unless: /usr/local/bin/vault_pki checkvalid
     - require:
       - group: setup new cert-access group

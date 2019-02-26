@@ -31,7 +31,7 @@ run vault_pki:
 
 checkgen_cert:
   cron.present:
-    - name: (/usr/local/bin/vault_pki list ; /usr/local/bin/vault_pki checkgen ; /usr/local/bin/vault_pki list) 2>&1 | logger -t vault_pki
+    - name: (/usr/local/bin/vault_pki list ; /usr/local/bin/vault_pki checkgen --timeout {{ vault_pki_timeout }}; /usr/local/bin/vault_pki list) 2>&1 | logger -t vault_pki
     - identifier: checkgen_cert
     - user: root
     - hour: random

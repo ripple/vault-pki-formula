@@ -195,6 +195,8 @@ SALT_EVENT_TRANSPORT = 'zeromq'
 # The depth of directory transversal in / to get to /etc/vault_pki/archive/my_hostname/
 CERTIFICATE_ID_DIRECTORY_DEPTH = 5
 
+PID = str(os.getpid())
+PIDFILE = "/var/run/vault_pki.pid"
 
 logger = logging.getLogger(__file__)
 
@@ -885,6 +887,14 @@ def setup_logger(logger, interactive=False, default_level=logging.INFO):
     logger.addHandler(log_handler)
 
 
+def is_currently_running():
+    # Check whether or not lock PIDFILE exists
+    if os.path.isfile(PIDFILE):
+        return True
+    else:
+        return False
+
+
 def main():
     """Setup arguments and run main functions for sub-commands."""
     parser = argparse.ArgumentParser(prog='vault_pki')
@@ -901,8 +911,7 @@ def main():
     parser_checkgen.set_defaults(main_func=checkgen_main)
 
     parser_checkgen = sub_parsers.add_parser('checkvalid', help='checkvalid help')
-    parser_checkgen.set_defaults(main_func=checkvalid_main)
-
+    parser_checkgen.set_defaults(main_func=checkvalid_main) 
     parser_list = sub_parsers.add_parser('list', help='list help')
     parser_list.add_argument('--active', action='store_true',
                              help='List only the active cert version.')
@@ -919,11 +928,19 @@ def main():
     args = parser.parse_args(sys.argv[1:])
     setup_logger(logger)
     try:
+        file(PIDFILE, 'w').write(PID);
         args.main_func(args)
     except AttributeError:
         parser.print_usage()
         sys.exit(1)
+    finally:
+        os.unlink(PIDFILE)
 
 
 if __name__ == '__main__':
-    main()
+    if not is_currently_running():
+        main()
+    else:
+        running_pid = ''.join(file(PIDFILE))
+        print("Script already running under PID {}, skipping execution.".format(running_pid))
+        sys.exit(1)

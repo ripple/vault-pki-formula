@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+echo "Running saltmaster tests..."
+vagrant ssh -- /vagrant/script/bats-test.sh master
+
+echo "Running minion tests..."
+vagrant ssh minion1 -- /vagrant/script/bats-test.sh minion

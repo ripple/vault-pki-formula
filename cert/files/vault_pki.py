@@ -71,6 +71,8 @@ checkgen
           the former into the new keys version directory.
         - Send the CSR in a Salt event call to the Salt master onward
           to be signed (with a return path to write the certificate at).
+        - Wait for signed CA from the Salt Master
+        - Write certificate to disk and activate new version
     - Otherwise if certificate is in OK, log that and exit.
 
 activate
@@ -121,6 +123,7 @@ import re
 import stat
 import subprocess
 import sys
+import time
 
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
@@ -131,6 +134,8 @@ from cryptography.hazmat.primitives import serialization
 import six
 
 from salt import client as salt_client
+from salt import config as salt_config
+from salt.utils import event as salt_event
 
 OWNER_UID = 0
 ACCESS_GROUP = 'cert-access'
@@ -164,6 +169,8 @@ DIR_TREE = [
 
 DIR_MODE = 0o750
 KEY_MODE = 0o640
+CA_MODE = 0o644
+CERT_MODE = 0o644
 
 KEY_FILENAME = 'privkey.pem'
 PKCS8_KEY_FILENAME = 'privkey.pkcs8'
@@ -179,6 +186,17 @@ KEY_FILENAME_TO_FORMAT = {
 }
 
 SALT_EVENT_TAG = 'request/sign'
+SALT_EVENT_RESPONSE_TAG = 'request/certificate'
+SALT_EVENT_WAIT_TIME = 120
+SALT_MINION_CONFIG = '/etc/salt/minion'
+SALT_SOCKET_DIR = '/var/run/salt'
+SALT_EVENT_TRANSPORT = 'zeromq'
+
+# The depth of directory transversal in / to get to /etc/vault_pki/archive/my_hostname/
+CERTIFICATE_ID_DIRECTORY_DEPTH = 5
+
+PID = str(os.getpid())
+PIDFILE = "/var/run/vault_pki.pid"
 
 logger = logging.getLogger(__file__)
 
@@ -196,6 +214,12 @@ class SetupError(Exception):
 class GenerationError(Exception):
     """Exception class for errors during key/CSR generation."""
     pass
+
+
+class FakeVersionArgParser(object):
+    """Craft an object appropriate to be used with 'activate_main' internally"""
+    def __init__(self, version):
+        self.version = [version]
 
 
 def _setup_directory(dir_path, mode, owner_uid, group_gid):
@@ -396,6 +420,71 @@ def send_cert_request(event_tag, new_version, dest_cert_path, csr):
                       path=dest_cert_path)
 
 
+def _wait_for_signed_cert_request(timeout, opts={}):
+    """Class to wait for cert via get_event"""
+    fqdn = platform.node()
+    opts['id'] = fqdn
+    opts['node'] = 'minion'
+    opts['transport'] = SALT_EVENT_TRANSPORT
+    opts['sock_dir'] = os.path.join(SALT_SOCKET_DIR, opts['node'])
+    stop_time = time.time() + timeout
+    event = salt_event.get_event(
+        opts['node'],
+        sock_dir=opts['sock_dir'],
+        transport=opts['transport'],
+        opts=opts,
+        listen=True)
+
+    while time.time() < stop_time:
+        ret = event.get_event(full=True)
+        if ret is None:
+            logger.debug('[_minion_event] No event data in packet')
+            continue
+        data = ret.get('data', False)
+        if data and ret['tag'] == SALT_EVENT_RESPONSE_TAG:
+            if _job_contains_cert_data(data):
+                logger.debug('[_minion_event] Job contains cert data!')
+                return data['data']
+            else:
+                logger.debug('[_minion_event] Job does not contains cert data. :(')
+                continue
+
+
+def _job_contains_cert_data(data):
+    """Boolean checks to ensure any received job message contains return cert data"""
+    if isinstance(data, dict):
+        if 'cert' in data['data']:
+            return True
+        else:
+            return False
+    else:
+        return False
+
+
+def _get_certificate_id(cert_data):
+    """Extract the latest ID from certificate response"""
+    cert_path = cert_data["cert_path"]
+    index = cert_path.split("/")[CERTIFICATE_ID_DIRECTORY_DEPTH]
+    if index.isdigit():
+        return index
+    else:
+        return False
+
+
+def _write_file(contents, path, owner_uid, group_gid, mode):
+    """Try to write file to filesystem with specific UID, GID, and file mode"""
+    try:
+        with open(path, 'w') as f:
+            f.write(contents)
+
+        os.chmod(path, mode)
+        os.chown(path, owner_uid, group_gid)
+
+        return True
+    except IOError:
+        return False
+
+
 def _atomic_link_switch(source, destination):
     """Does an atomic symlink swap by overwriting the destination symlink.
 
@@ -427,6 +516,7 @@ def _activate_version(version_str, live_dir):
     live_pkcs8_key_path = os.path.join(live_dir, PKCS8_KEY_FILENAME)
     live_cert_path = os.path.join(live_dir, CERT_FILENAME)
     live_chain_path = os.path.join(live_dir, FULLCHAIN_FILENAME)
+    current_path = os.path.join(live_dir, 'current')
     (cert_path,
      chain_path,
      key_path,
@@ -447,6 +537,7 @@ def _activate_version(version_str, live_dir):
 
 def _activate_version_with_rollback(version_str, live_dir):
     """Activate a cert/key version but rollback to if errors occur.
+
 
     Records the current cert/key version before activation and if it
     is sane attempts to restore it in the event of an error occuring.
@@ -564,6 +655,59 @@ def _get_version_assets(version_str, fqdn=None, base_dir=BASE_DIR):
     return (cert_path, chain_path, key_path, pkcs8_key_path)
 
 
+def _request_new_certificate(fqdn, group_gid, timeout):
+    """
+    Request a new certificate via Salt Event Bus, and wait for response
+    """
+    format_settings = {'base': BASE_DIR, 'fqdn': fqdn}
+    archive_dir = ARCHIVE_DIR.format(**format_settings)
+    key_dir = KEY_DIR.format(**format_settings)
+    live_dir = LIVE_DIR.format(**format_settings)
+    cert_path = os.path.join(live_dir, CERT_FILENAME)
+    version_base_dirs = [archive_dir, key_dir]
+    new_version = create_new_version_dir(version_base_dirs,
+                                            DIR_MODE,
+                                            OWNER_UID,
+                                            group_gid)
+    new_key_dir = os.path.join(key_dir, new_version)
+    csr = generate(fqdn,
+                    new_key_dir,
+                    DEFAULT_KEY_LENGTH,
+                    KEY_MODE, OWNER_UID,
+                    group_gid)
+    new_archive_dir = os.path.join(archive_dir, new_version)
+    sent_ok = send_cert_request(SALT_EVENT_TAG,
+                                new_version,
+                                new_archive_dir,
+                                csr)
+    if not sent_ok:
+        return False
+
+    certificate_data = _wait_for_signed_cert_request(timeout)
+    if not certificate_data:
+        logger.error('Did not receive certificate from salt master')
+        return False
+
+    certificate_id = _get_certificate_id(certificate_data)
+    if not certificate_id:
+        logger.error('Error retrieving certificate ID')
+        return False
+
+    cert = certificate_data['cert']
+    cert_path = certificate_data['cert_path']
+    ca = certificate_data['fullchain']
+    ca_path = certificate_data['fullchain_path']
+
+    write_ca = _write_file(ca, ca_path, OWNER_UID, group_gid, CA_MODE)
+    write_cert = _write_file(cert, cert_path, OWNER_UID, group_gid, CERT_MODE)
+
+    if write_ca and write_cert:
+        return certificate_id
+    else:
+        logger.error('Error writing certificates to disk')
+        return False
+
+
 def get_post_activate_scripts(base_dir=BASE_DIR):
     """Get a list of the full paths of post activate scripts.
     """
@@ -663,8 +807,6 @@ def checkgen_main(args):
     except SetupError:
         raise
     format_settings = {'base': BASE_DIR, 'fqdn': fqdn}
-    archive_dir = ARCHIVE_DIR.format(**format_settings)
-    key_dir = KEY_DIR.format(**format_settings)
     live_dir = LIVE_DIR.format(**format_settings)
     cert_path = os.path.join(live_dir, CERT_FILENAME)
 
@@ -672,26 +814,41 @@ def checkgen_main(args):
         logger.info('Run with *force* new cert generation.')
 
     if new_cert_needed(cert_path) or args.force:
-        version_base_dirs = [archive_dir, key_dir]
-        new_version = create_new_version_dir(version_base_dirs,
-                                             DIR_MODE,
-                                             OWNER_UID,
-                                             group_gid)
-        new_key_dir = os.path.join(key_dir, new_version)
-        csr = generate(fqdn,
-                       new_key_dir,
-                       DEFAULT_KEY_LENGTH,
-                       KEY_MODE, OWNER_UID,
-                       group_gid)
-        new_archive_dir = os.path.join(archive_dir, new_version)
-        sent_ok = send_cert_request(SALT_EVENT_TAG,
-                                    new_version,
-                                    new_archive_dir,
-                                    csr)
-        if not sent_ok:
-            logger.error('Error sending CSR to salt master!')
+        certificate_id = _request_new_certificate(fqdn, group_gid, args.timeout)
+        if certificate_id:
+            args = FakeVersionArgParser(certificate_id)
+            activate_main(args)
+        else:
+            logger.error('Unable to update certificate.')
+            sys.exit(1)
     else:
         logger.info('Cert Status: OK.')
+        sys.exit(0)
+
+
+def checkvalid_main(args):
+    """Function to quickly check if a certificate update is needed
+
+    Only runs a small part of the checkgen_main script in order to test
+    for certificate validity. This is used to ensure state in configuration
+    management tooling.
+    """
+    fqdn = platform.node()
+    if not fqdn:
+        raise SetupError('Missing FQDN!')
+    try:
+        group_info = grp.getgrnam(ACCESS_GROUP)
+        group_gid = group_info.gr_gid
+    except KeyError:
+        raise SetupError('Missing group: {}'.format(ACCESS_GROUP))
+
+    format_settings = {'base': BASE_DIR, 'fqdn': fqdn}
+    live_dir = LIVE_DIR.format(**format_settings)
+    cert_path = os.path.join(live_dir, CERT_FILENAME)
+    if new_cert_needed(cert_path):
+        sys.exit(1)
+    else:
+        sys.exit(0)
 
 
 def list_main(args):
@@ -730,6 +887,14 @@ def setup_logger(logger, interactive=False, default_level=logging.INFO):
     logger.addHandler(log_handler)
 
 
+def is_currently_running():
+    # Check whether or not lock PIDFILE exists
+    if os.path.isfile(PIDFILE):
+        return True
+    else:
+        return False
+
+
 def main():
     """Setup arguments and run main functions for sub-commands."""
     parser = argparse.ArgumentParser(prog='vault_pki')
@@ -738,8 +903,15 @@ def main():
     parser_checkgen = sub_parsers.add_parser('checkgen', help='checkgen help')
     parser_checkgen.add_argument('--force', action='store_true',
                                  help='Force new cert generation.')
+    parser_checkgen.add_argument('-t', '--timeout',
+                                 type=int,
+                                 default=SALT_EVENT_WAIT_TIME,
+                                 help="Time (sec) to wait for Cert. Default: {}"
+                                 .format(SALT_EVENT_WAIT_TIME))
     parser_checkgen.set_defaults(main_func=checkgen_main)
 
+    parser_checkgen = sub_parsers.add_parser('checkvalid', help='checkvalid help')
+    parser_checkgen.set_defaults(main_func=checkvalid_main) 
     parser_list = sub_parsers.add_parser('list', help='list help')
     parser_list.add_argument('--active', action='store_true',
                              help='List only the active cert version.')
@@ -756,11 +928,19 @@ def main():
     args = parser.parse_args(sys.argv[1:])
     setup_logger(logger)
     try:
+        file(PIDFILE, 'w').write(PID);
         args.main_func(args)
     except AttributeError:
         parser.print_usage()
         sys.exit(1)
+    finally:
+        os.unlink(PIDFILE)
 
 
 if __name__ == '__main__':
-    main()
+    if not is_currently_running():
+        main()
+    else:
+        running_pid = ''.join(file(PIDFILE))
+        print("Script already running under PID {}, skipping execution.".format(running_pid))
+        sys.exit(1)

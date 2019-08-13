@@ -16,62 +16,6 @@
 #
 # vim: set ft=sls :
 
-{% set os_family = grains['os_family'] -%}
-
 include:
-  - python.pip
-
-setup new cert-access group:
-  group.present:
-    - name: cert-access
-
-install crypto dependencies:
-  pkg.installed:
-    - pkgs:
-{% if os_family == 'Debian' %}
-      - python-dev
-      - libssl-dev
-      - libffi-dev
-{% elif os_family == 'RedHat' %}
-      - python-devel
-      - libffi-devel
-      - openssl-libs
-{% endif -%}
-
-install python cryptography module:
-  pip.installed:
-    - name: cryptography
-{% if os_family == 'Debian' %}
-    - bin_env: /usr/local/bin/pip2
-{% elif os_family == 'RedHat' %}
-    - bin_env: /usr/bin/pip2
-{% endif %}
-    - reload_modules: true
-    - require:
-      - pkg: python2-pip
-
-/usr/local/bin/vault_pki:
-  file.managed:
-    - source: salt://cert/files/vault_pki.py
-    - user: root
-    - group: root
-    - mode: 0755
-
-run vault_pki to get initial cert:
-  cmd.run:
-    - name: /usr/local/bin/vault_pki checkgen
-    - require:
-      - group: setup new cert-access group
-      - pkg: install crypto dependencies
-      - pip: install python cryptography module
-      - file: /usr/local/bin/vault_pki
-
-checkgen_cert:
-  cron.present:
-    - name: (/usr/local/bin/vault_pki list ; /usr/local/bin/vault_pki checkgen ; /usr/local/bin/vault_pki list) 2>&1 | logger -t vault_pki
-    - identifier: checkgen_cert
-    - user: root
-    - hour: random
-    - minute: random
-    - require:
-      - file: /usr/local/bin/vault_pki
+  - cert.install
+  - cert.activate

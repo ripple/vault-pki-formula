@@ -9,14 +9,3 @@ push_signed_cert:
       csr: |
         {{ payload['csr']|indent(8, false) }}
       path: {{ payload['path'] }}
-
-activate_new_version:
-  salt.state:
-    - tgt: {{ target }}
-    - sls:
-      - cert.react_activate_cert
-    - pillar:
-        # beware version being converted to a number
-        version: "{{ payload['version'] }}"
-    - require:
-      - salt: push_signed_cert

@@ -1,0 +1,15 @@
+{% set python = salt['pillar.get']('python', []) -%}
+{% set proxy_url = salt['pillar.get']('proxy_url', None) -%}
+
+[global]
+{% if 'extra_index_url' in python -%}
+extra-index-url = {{ python['extra_index_url'] }}
+{% endif -%}
+
+{% if 'index_url' in python -%}
+index-url = {{ python['index_url'] }}
+{% endif -%}
+
+{% if proxy_url -%}
+proxy = {{ proxy_url }}
+{% endif -%}

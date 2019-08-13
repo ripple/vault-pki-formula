@@ -1,0 +1,5 @@
+.vagrant
+intermediate.*
+vault-pki-policy.*
+*.swp
+.#*

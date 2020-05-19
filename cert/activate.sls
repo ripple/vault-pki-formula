@@ -31,7 +31,11 @@ run vault_pki:
 
 checkgen_cert:
   cron.present:
+    {% if 'prod' in grains['fqdn'] or 'staging' in grains['fqdn'] %}
+    - name: (/usr/local/bin/vault_pki list ; /usr/local/bin/vault_pki checkgen --timeout {{ vault_pki_timeout }}; /usr/local/bin/vault_pki list) 2>&1 | tee -a /var/log/cron.log | logger -t vault_pki
+    {% else %}
     - name: (/usr/local/bin/vault_pki list ; /usr/local/bin/vault_pki checkgen --timeout {{ vault_pki_timeout }}; /usr/local/bin/vault_pki list) 2>&1 | logger -t vault_pki
+    {% endif %}
     - identifier: checkgen_cert
     - user: root
     - hour: random

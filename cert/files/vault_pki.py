@@ -928,7 +928,7 @@ def main():
     args = parser.parse_args(sys.argv[1:])
     setup_logger(logger)
     try:
-        file(PIDFILE, 'w').write(PID);
+        open(PIDFILE, 'w').write(PID);
         args.main_func(args)
     except AttributeError:
         parser.print_usage()

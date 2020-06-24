@@ -106,11 +106,6 @@ Things that could be improved / Ways to help:
       fqdn, verbose, print active version for list, etc.
 """
 
-
-
-
-
-
 __author__ = 'Daniel Wilcox (dmw@ripple.com)'
 
 import argparse

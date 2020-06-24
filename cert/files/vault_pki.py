@@ -106,10 +106,10 @@ Things that could be improved / Ways to help:
       fqdn, verbose, print active version for list, etc.
 """
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 __author__ = 'Daniel Wilcox (dmw@ripple.com)'
 
@@ -326,7 +326,7 @@ def get_version_dirs(version_base_dirs):
                     if _match_version_dir(version)]
         versions_by_base_dir[base_dir] = set(versions)
 
-    for base_dir, versions in versions_by_base_dir.items():
+    for base_dir, versions in list(versions_by_base_dir.items()):
         if match_values is None:
             match_values = versions
             continue
@@ -713,7 +713,7 @@ def get_post_activate_scripts(base_dir=BASE_DIR):
     """
     format_settings = {'base': base_dir}
     post_activate_dir = POST_ACTIVATE_DIR.format(**format_settings)
-    path, _, activate_files = os.walk(post_activate_dir).next()
+    path, _, activate_files = next(os.walk(post_activate_dir))
     activate_scripts = []
     for script in activate_files:
         script_path = os.path.join(path, script)

